@@ -1,0 +1,17 @@
+[package]
+name = "download"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.102"
+async_zip = { version = "0.0.18", features = ["tokio", "deflate"] }
+axum = { version = "0.8.8" }
+bytes = "1.11.1"
+common = { path = "../common" }
+futures = "0.3.32"
+futures-lite = "2"
+russh = "0.57.1"
+russh-sftp = "2.1.1"
+tokio = { version = "1.50.0", features = ["full"] }
+tokio-util = { version = "0.7", features = ["io"] }

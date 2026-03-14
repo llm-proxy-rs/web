@@ -1,0 +1,16 @@
+[package]
+name = "chat-relay"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.102"
+bytes = "1.11.1"
+futures = "0.3.32"
+russh = "0.57.1"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+ssh-client = { path = "../ssh-client" }
+tokio = { version = "1.50.0", features = ["full"] }
+tokio-stream = "0.1.18"
+tracing = "0.1.44"

@@ -1,0 +1,3 @@
+[workspace]
+resolver = "3"
+members = ["chat-history","chat-relay","common","download","firecracker-client","firecracker-manager","net-helper","sftp-client","ssh-client","store","upload","vm-lifecycle"]

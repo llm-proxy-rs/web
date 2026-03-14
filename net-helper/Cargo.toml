@@ -1,0 +1,15 @@
+[package]
+name = "net-helper"
+version = "0.1.0"
+description = "Privileged helper binary for TAP device management and NAT setup"
+edition = "2024"
+
+[[bin]]
+name = "net-helper"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.102"
+caps = "0.5.6"
+clap = { version = "4.6.0", features = ["derive"] }
+ipnet = "2.12.0"
