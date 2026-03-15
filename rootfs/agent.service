@@ -1,0 +1,17 @@
+[Unit]
+Description=Agent daemon
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+ExecStart=/usr/local/bin/uv run /opt/agent.py
+Restart=always
+RestartSec=2
+StandardOutput=append:/var/log/agent.log
+StandardError=append:/var/log/agent.log
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

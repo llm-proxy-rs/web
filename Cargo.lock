@@ -810,6 +810,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "chat-settings"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "russh",
+ "serde_json",
+ "ssh-client",
+ "tokio",
+]
+
+[[package]]
 name = "chrono"
 version = "0.4.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
