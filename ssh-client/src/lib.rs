@@ -29,7 +29,7 @@ impl Handler for SshClient {
         let matches = self
             .vm_host_key
             .as_ref()
-            .map_or(true, |key| server_public_key == key);
+            .is_none_or(|key| server_public_key == key);
         async move { Ok(matches) }
     }
 }

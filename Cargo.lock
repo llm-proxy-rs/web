@@ -778,6 +778,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "chat-agent"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "chrono",
+ "futures",
+ "russh",
+ "serde",
+ "serde_json",
+ "ssh-client",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+]
+
+[[package]]
 name = "chat-history"
 version = "0.1.0"
 dependencies = [
@@ -790,22 +807,6 @@ dependencies = [
  "sftp-client",
  "ssh-client",
  "tokio",
-]
-
-[[package]]
-name = "chat-relay"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytes",
- "futures",
- "russh",
- "serde",
- "serde_json",
- "ssh-client",
- "tokio",
- "tokio-stream",
- "tracing",
 ]
 
 [[package]]
@@ -896,6 +897,15 @@ checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
 [[package]]
 name = "common"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "tokio",
+]
+
+[[package]]
+name = "common"
+version = "0.1.0"
+source = "git+https://github.com/llm-proxy-rs/web#e6a0e61363a993f625713a6aa0186bd9c508808f"
 dependencies = [
  "anyhow",
  "tokio",
@@ -1235,7 +1245,7 @@ dependencies = [
  "async_zip",
  "axum",
  "bytes",
- "common",
+ "common 0.1.0",
  "futures",
  "futures-lite",
  "russh",
@@ -1411,13 +1421,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "firecracker-client"
+version = "0.1.0"
+source = "git+https://github.com/llm-proxy-rs/web#e6a0e61363a993f625713a6aa0186bd9c508808f"
+dependencies = [
+ "anyhow",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "firecracker-manager"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
- "common",
- "firecracker-client",
+ "common 0.1.0",
+ "firecracker-client 0.1.0",
  "ipnetwork",
  "macaddr",
  "nix 0.31.2",
@@ -1427,6 +1451,24 @@ dependencies = [
  "toml",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "firecracker-manager"
+version = "0.1.0"
+source = "git+https://github.com/llm-proxy-rs/web#e6a0e61363a993f625713a6aa0186bd9c508808f"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "common 0.1.0 (git+https://github.com/llm-proxy-rs/web)",
+ "firecracker-client 0.1.0 (git+https://github.com/llm-proxy-rs/web)",
+ "ipnetwork",
+ "macaddr",
+ "nix 0.31.2",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -4000,6 +4042,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -4188,7 +4231,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytes",
- "common",
+ "common 0.1.0",
  "russh-sftp",
  "tokio",
 ]
@@ -4254,8 +4297,8 @@ dependencies = [
  "aws-config",
  "aws-credential-types",
  "chrono",
- "common",
- "firecracker-manager",
+ "common 0.1.0",
+ "firecracker-manager 0.1.0 (git+https://github.com/llm-proxy-rs/web)",
  "serde_json",
  "tokio",
  "tracing",

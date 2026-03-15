@@ -1,5 +1,5 @@
 use anyhow::{Result, bail};
-use std::path::Path;
+use std::path::{Component, Path};
 use tokio::process::Command;
 
 pub async fn copy_sparse(src: &Path, dst: &Path) -> Result<()> {
@@ -22,6 +22,9 @@ pub async fn copy_sparse(src: &Path, dst: &Path) -> Result<()> {
 }
 
 pub fn validate_within_dir(real_path: &Path, allowed_dir: &Path) -> Result<()> {
+    if real_path.components().any(|c| c == Component::ParentDir) {
+        bail!("path must be canonicalized before validation");
+    }
     if !real_path.starts_with(allowed_dir) {
         bail!("path is outside the allowed directory");
     }
@@ -72,12 +75,14 @@ mod tests {
     }
 
     #[test]
-    fn test_traversal_without_canonicalization_bypasses_check() {
+    fn test_traversal_rejected_due_to_parent_dir_component() {
         // Path::starts_with does not resolve "..": the components of
-        // "/uploads/../etc/passwd" start with [/, uploads] so the check passes.
-        // This documents why callers must canonicalize paths before calling this function.
+        // "/uploads/../etc/passwd" start with [/, uploads] so starts_with
+        // would pass. validate_within_dir rejects any path containing ".."
+        // so callers do not need to canonicalize first to be safe.
         assert!(
-            validate_within_dir(Path::new("/uploads/../etc/passwd"), Path::new("/uploads")).is_ok()
+            validate_within_dir(Path::new("/uploads/../etc/passwd"), Path::new("/uploads"))
+                .is_err()
         );
     }
 }

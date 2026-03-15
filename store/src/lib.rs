@@ -2,7 +2,7 @@ mod user;
 
 use anyhow::Result;
 pub use sqlx::PgPool;
-pub use user::{User, upsert_user};
+pub use user::{User, get_user_by_email, upsert_user};
 
 pub async fn connect_db(url: &str) -> Result<PgPool> {
     let pg_pool = PgPool::connect(url).await?;
