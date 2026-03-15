@@ -29,7 +29,7 @@ impl Handler for SshClient {
         let matches = self
             .vm_host_key
             .as_ref()
-            .is_none_or(|key| server_public_key == key);
+            .map_or(true, |key| server_public_key == key);
         async move { Ok(matches) }
     }
 }
@@ -105,4 +105,14 @@ pub async fn open_exec_channel(
     let ssh_channel = ssh_handle.channel_open_session().await?;
     ssh_channel.exec(false, command).await?;
     Ok(ssh_channel)
+}
+
+pub async fn open_direct_streamlocal_channel(
+    ssh_handle: &Handle<SshClient>,
+    socket_path: &str,
+) -> Result<Channel<Msg>> {
+    ssh_handle
+        .channel_open_direct_streamlocal(socket_path)
+        .await
+        .with_context(|| format!("failed to open direct-streamlocal channel to {socket_path}"))
 }
