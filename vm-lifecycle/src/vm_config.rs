@@ -36,3 +36,28 @@ pub fn build_vm_config(
         },
     })
 }
+
+pub fn build_vm_config_without_iam(
+    vm_build_config: &VmBuildConfig,
+    user_rootfs: &Path,
+) -> VmConfig {
+    let vm_id = Uuid::new_v4().to_string();
+    VmConfig {
+        id: vm_id,
+        kernel_path: vm_build_config.kernel_path.clone(),
+        rootfs_path: user_rootfs.to_path_buf(),
+        net_helper_path: vm_build_config.net_helper_path.clone(),
+        vcpu_count: vm_build_config.vcpu_count,
+        mem_size_mib: vm_build_config.mem_size_mib,
+        boot_args: BOOT_ARGS.to_string(),
+        mmds_metadata: None,
+        mmds_imds_compat: false,
+        jailer: JailerConfig {
+            jailer_path: vm_build_config.jailer_path.clone(),
+            firecracker_path: vm_build_config.firecracker_path.clone(),
+            uid: vm_build_config.jailer_uid,
+            gid: vm_build_config.jailer_gid,
+            chroot_base: vm_build_config.jailer_chroot_base.clone(),
+        },
+    }
+}

@@ -19,7 +19,7 @@ pub use rootfs::{
     build_user_rootfs_path, ensure_user_rootfs, find_user_rootfs, save_all_vm_rootfs,
 };
 pub use sweep::sweep_idle_vms;
-pub use vm_config::build_vm_config;
+pub use vm_config::{build_vm_config, build_vm_config_without_iam};
 
 pub struct VmBuildConfig {
     pub kernel_path: PathBuf,
@@ -38,7 +38,6 @@ pub type VmRegistry = Arc<Mutex<HashMap<String, VmEntry>>>;
 pub struct VmEntry {
     pub user_id: Uuid,
     pub has_iam_creds: bool,
-    pub created_at: Instant,
-    pub ws_connected: bool,
+    pub last_activity: Instant,
     pub vm: Vm,
 }

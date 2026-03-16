@@ -1,0 +1,37 @@
+@import"https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap";.xterm{cursor:text;position:relative;user-select:none;-ms-user-select:none;-webkit-user-select:none}.xterm.focus,.xterm:focus{outline:none}.xterm .xterm-helpers{position:absolute;top:0;z-index:5}.xterm .xterm-helper-textarea{padding:0;border:0;margin:0;position:absolute;opacity:0;left:-9999em;top:0;width:0;height:0;z-index:-5;white-space:nowrap;overflow:hidden;resize:none}.xterm .composition-view{background:#000;color:#fff;display:none;position:absolute;white-space:nowrap;z-index:1}.xterm .composition-view.active{display:block}.xterm .xterm-viewport{background-color:#000;overflow-y:scroll;cursor:default;position:absolute;inset:0}.xterm .xterm-screen{position:relative}.xterm .xterm-screen canvas{position:absolute;left:0;top:0}.xterm .xterm-scroll-area{visibility:hidden}.xterm-char-measure-element{display:inline-block;visibility:hidden;position:absolute;top:0;left:-9999em;line-height:normal}.xterm.enable-mouse-events{cursor:default}.xterm.xterm-cursor-pointer,.xterm .xterm-cursor-pointer{cursor:pointer}.xterm.column-select.focus{cursor:crosshair}.xterm .xterm-accessibility:not(.debug),.xterm .xterm-message{position:absolute;inset:0;z-index:10;color:transparent;pointer-events:none}.xterm .xterm-accessibility-tree:not(.debug) *::selection{color:transparent}.xterm .xterm-accessibility-tree{user-select:text;white-space:pre}.xterm .live-region{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}.xterm-dim{opacity:1!important}.xterm-underline-1{text-decoration:underline}.xterm-underline-2{text-decoration:double underline}.xterm-underline-3{text-decoration:wavy underline}.xterm-underline-4{text-decoration:dotted underline}.xterm-underline-5{text-decoration:dashed underline}.xterm-overline{text-decoration:overline}.xterm-overline.xterm-underline-1{text-decoration:overline underline}.xterm-overline.xterm-underline-2{text-decoration:overline double underline}.xterm-overline.xterm-underline-3{text-decoration:overline wavy underline}.xterm-overline.xterm-underline-4{text-decoration:overline dotted underline}.xterm-overline.xterm-underline-5{text-decoration:overline dashed underline}.xterm-strikethrough{text-decoration:line-through}.xterm-screen .xterm-decoration-container .xterm-decoration{z-index:6;position:absolute}.xterm-screen .xterm-decoration-container .xterm-decoration.xterm-decoration-top-layer{z-index:7}.xterm-decoration-overview-ruler{z-index:8;position:absolute;top:0;right:0;pointer-events:none}.xterm-decoration-top{z-index:2;position:relative}@tailwind base;@tailwind components;@tailwind utilities;:root{--background: 220 26% 7%;--foreground: 213 31% 91%;--card: 215 28% 10%;--card-foreground: 213 31% 91%;--primary: 212 100% 67%;--primary-foreground: 220 26% 7%;--secondary: 215 14% 15%;--secondary-foreground: 213 31% 91%;--muted: 215 14% 15%;--muted-foreground: 215 13% 55%;--accent: 215 14% 18%;--accent-foreground: 213 31% 91%;--destructive: 0 63% 40%;--destructive-foreground: 213 31% 91%;--border: 215 19% 15%;--input: 215 14% 20%;--ring: 212 100% 67%;--radius: .5rem}.light{--background: 0 0% 100%;--foreground: 215 28% 17%;--card: 210 17% 97%;--card-foreground: 215 28% 17%;--primary: 213 94% 40%;--primary-foreground: 0 0% 100%;--secondary: 213 17% 93%;--secondary-foreground: 215 28% 17%;--muted: 213 17% 93%;--muted-foreground: 215 18% 47%;--accent: 213 17% 91%;--accent-foreground: 215 28% 17%;--destructive: 0 84% 60%;--destructive-foreground: 0 0% 100%;--border: 213 25% 88%;--input: 213 25% 88%;--ring: 213 94% 40%}*,:before,:after{border-color:hsl(var(--border));box-sizing:border-box}body{background-color:hsl(var(--background));color:hsl(var(--foreground));font-family:IBM Plex Sans,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;line-height:1.6}code,pre,kbd,samp{font-family:IBM Plex Mono,Fira Code,ui-monospace,monospace}button,a,input,textarea,select,[role=button]{transition:background-color .14s ease,border-color .14s ease,color .14s ease,opacity .14s ease,box-shadow .14s ease,transform .1s ease}::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#7f899c47;border-radius:10px}::-webkit-scrollbar-thumb:hover{background:#7f899c80}*{scrollbar-width:thin;scrollbar-color:rgba(127,137,156,.28) transparent}.prose pre{background-color:hsl(var(--muted));border:1px solid hsl(var(--border));border-radius:.5rem;overflow-x:auto;font-size:.8125rem;line-height:1.7}.prose code{font-size:.875em}.prose :not(pre)>code{background-color:hsl(var(--muted));padding:.15em .4em;border-radius:.25rem;font-size:.8125em;border:1px solid hsl(var(--border))}.prose table{display:block;overflow-x:auto;font-size:.875em}.prose a{color:hsl(var(--primary));text-decoration:underline;text-underline-offset:3px}.prose blockquote{border-left-color:hsl(var(--primary) / .4)}.prose hr{border-color:hsl(var(--border))}@keyframes chatDot{0%,60%,to{transform:translateY(0);opacity:.4}30%{transform:translateY(-4px);opacity:1}}.thinking-dot{animation:chatDot 1.2s ease-in-out infinite}.thinking-dot:nth-child(2){animation-delay:.2s}.thinking-dot:nth-child(3){animation-delay:.4s}@keyframes messageSlideIn{0%{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}.message-slide-in{animation:messageSlideIn .18s ease-out forwards}@keyframes fadeIn{0%{opacity:0}to{opacity:1}}.fade-in{animation:fadeIn .2s ease-out forwards}@media(prefers-reduced-motion:reduce){*,:before,:after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+/*! Bundled license information:
+
+@xterm/xterm/css/xterm.css:
+  (**
+   * Copyright (c) 2014 The xterm.js authors. All rights reserved.
+   * Copyright (c) 2012-2013, Christopher Jeffrey (MIT License)
+   * https://github.com/chjj/term.js
+   * @license MIT
+   *
+   * Permission is hereby granted, free of charge, to any person obtaining a copy
+   * of this software and associated documentation files (the "Software"), to deal
+   * in the Software without restriction, including without limitation the rights
+   * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+   * copies of the Software, and to permit persons to whom the Software is
+   * furnished to do so, subject to the following conditions:
+   *
+   * The above copyright notice and this permission notice shall be included in
+   * all copies or substantial portions of the Software.
+   *
+   * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+   * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+   * THE SOFTWARE.
+   *
+   * Originally forked from (with the author's permission):
+   *   Fabrice Bellard's javascript vt100 for jslinux:
+   *   http://bellard.org/jslinux/
+   *   Copyright (c) 2011 Fabrice Bellard
+   *   The original design remains. The terminal itself
+   *   has been extended to include xterm CSI codes, among
+   *   other features.
+   *)
+*/

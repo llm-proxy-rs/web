@@ -36,8 +36,12 @@ pub async fn ensure_user_rootfs(
     if rootfs_path.exists() {
         return Ok(rootfs_path);
     }
-    fs::create_dir_all(user_rootfs_dir).await?;
-    copy_sparse(base_rootfs_path, &rootfs_path).await?;
+    fs::create_dir_all(user_rootfs_dir)
+        .await
+        .context("failed to create user rootfs dir")?;
+    copy_sparse(base_rootfs_path, &rootfs_path)
+        .await
+        .context("failed to copy base rootfs")?;
     Ok(rootfs_path)
 }
 

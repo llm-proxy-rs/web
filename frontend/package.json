@@ -1,0 +1,32 @@
+{
+  "private": true,
+  "scripts": {
+    "build": "esbuild src/index.tsx --bundle --minify --outfile=dist/app.js --loader:.tsx=tsx --loader:.ts=ts && ./node_modules/.bin/tailwindcss -i src/index.css -o dist/styles.css --minify",
+    "watch": "esbuild src/index.tsx --bundle --outfile=dist/app.js --loader:.tsx=tsx --loader:.ts=ts --watch & ./node_modules/.bin/tailwindcss -i src/index.css -o dist/styles.css --watch",
+    "build:js": "esbuild src/index.tsx --bundle --minify --outfile=dist/app.js --loader:.tsx=tsx --loader:.ts=ts",
+    "build:css": "./node_modules/.bin/tailwindcss -i src/index.css -o dist/styles.css --minify",
+    "test": "playwright test",
+    "test:ui": "playwright test --ui",
+    "test:headed": "playwright test --headed"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
+    "esbuild": "^0.25.0",
+    "tailwindcss": "^3.4.0",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "highlight.js": "^11.11.1",
+    "lucide-react": "^0.469.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-markdown": "^9",
+    "rehype-sanitize": "^6",
+    "remark-gfm": "^4.0.1",
+    "tailwind-merge": "^3.0.0"
+  }
+}
