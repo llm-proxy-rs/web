@@ -93,7 +93,11 @@ export interface ErrorMessage extends BaseMessage {
   content: string;
 }
 
-export type ChatMessage = UserMessage | AssistantMessage | ToolMessage | ErrorMessage;
+export type ChatMessage =
+  | UserMessage
+  | AssistantMessage
+  | ToolMessage
+  | ErrorMessage;
 
 // SSE event payloads
 export interface SseTextDelta {
@@ -143,17 +147,28 @@ export interface SseErrorEvent {
 }
 
 export type SseEvent =
-  | { type: "task_created"; payload: SseTaskCreated }
-  | { type: "session_start"; payload: SseSessionStart }
-  | { type: "init" }
-  | { type: "text_delta"; payload: SseTextDelta }
-  | { type: "thinking_delta"; payload: SseThinkingDelta }
-  | { type: "tool_start"; payload: SseToolStart }
-  | { type: "ask_user_question"; payload: SseAskUserQuestion }
-  | { type: "tool_result"; payload: SseToolResult }
-  | { type: "done"; payload: SseDone }
-  | { type: "error_event"; payload: SseErrorEvent }
-  | { type: "reconnecting"; payload: { task_id: string; conversation_id: string } };
+  | { type: "task_created"; payload: SseTaskCreated; conversationId?: string }
+  | { type: "session_start"; payload: SseSessionStart; conversationId?: string }
+  | { type: "init"; conversationId?: string }
+  | { type: "text_delta"; payload: SseTextDelta; conversationId?: string }
+  | {
+      type: "thinking_delta";
+      payload: SseThinkingDelta;
+      conversationId?: string;
+    }
+  | { type: "tool_start"; payload: SseToolStart; conversationId?: string }
+  | {
+      type: "ask_user_question";
+      payload: SseAskUserQuestion;
+      conversationId?: string;
+    }
+  | { type: "tool_result"; payload: SseToolResult; conversationId?: string }
+  | { type: "done"; payload: SseDone; conversationId?: string }
+  | { type: "error_event"; payload: SseErrorEvent; conversationId?: string }
+  | {
+      type: "reconnecting";
+      payload: { task_id: string; conversation_id: string };
+    };
 
 export interface FileEntry {
   name: string;

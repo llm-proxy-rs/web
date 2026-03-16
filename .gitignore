@@ -1,4 +1,6 @@
-**/__pycache__/
 **/.pytest_cache/
-**/node-modules/
+**/__pycache__/
+**/dist/
+**/node_modules/
+**/test-results/
 target/

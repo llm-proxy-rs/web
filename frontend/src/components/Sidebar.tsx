@@ -5,7 +5,7 @@ import type { Conversation } from "../types";
 interface SidebarProps {
   conversations: Conversation[];
   viewConversationId: string | null;
-  runningConversationId: string | null;
+  runningConversationIds: Set<string>;
   onSelectConversation: (conversation: Conversation) => void;
   onNewChat: () => void;
   onDeleteConversation: (conversation: Conversation) => void;
@@ -15,7 +15,7 @@ interface SidebarProps {
 export default function Sidebar({
   conversations,
   viewConversationId,
-  runningConversationId,
+  runningConversationIds,
   onSelectConversation,
   onNewChat,
   onDeleteConversation,
@@ -38,14 +38,18 @@ export default function Sidebar({
 
       <div className="flex-1 overflow-y-auto py-1.5">
         {conversations.length === 0 ? (
-          <p className="px-3 py-8 text-center text-xs text-muted-foreground">No conversations yet</p>
+          <p className="px-3 py-8 text-center text-xs text-muted-foreground">
+            No conversations yet
+          </p>
         ) : (
           conversations.map((conversation) => (
             <ConversationRow
               key={conversation.conversationId}
               conversation={conversation}
               isActive={conversation.conversationId === viewConversationId}
-              isRunning={conversation.conversationId === runningConversationId}
+              isRunning={runningConversationIds.has(
+                conversation.conversationId,
+              )}
               onSelect={() => onSelectConversation(conversation)}
               onDelete={() => onDeleteConversation(conversation)}
             />
@@ -100,12 +104,17 @@ function ConversationRow({
           <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary" />
         </span>
       )}
-      <span className={`flex-1 truncate leading-snug ${isPending ? "italic opacity-60" : ""}`}>
+      <span
+        className={`flex-1 truncate leading-snug ${isPending ? "italic opacity-60" : ""}`}
+      >
         {title}
       </span>
       {hovered && (
         <button
-          onClick={(e) => { e.stopPropagation(); onDelete(); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
           className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-muted-foreground hover:text-destructive"
         >
           <Trash2 className="h-3 w-3" />

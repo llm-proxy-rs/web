@@ -18,7 +18,7 @@ function parentPath(path: string, rootPath: string): string {
 }
 
 export default function FileManager() {
-  const { vmId, uploadDir, uploadAction, csrfToken } = useSse();
+  const { uploadDir, uploadAction, csrfToken } = useSse();
   const [currentPath, setCurrentPath] = useState(uploadDir);
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -30,7 +30,9 @@ export default function FileManager() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/sessions/${vmId}/ls?path=${encodeURIComponent(path)}`, { signal });
+      const res = await fetch(`/ls?path=${encodeURIComponent(path)}`, {
+        signal,
+      });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
       setCurrentPath(path);
@@ -41,7 +43,7 @@ export default function FileManager() {
     } finally {
       setLoading(false);
     }
-  }, [vmId]);
+  }, []);
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -49,24 +51,37 @@ export default function FileManager() {
     return () => abortController.abort();
   }, [uploadDir, loadDir]);
 
-  const handleUpload = useCallback(async (file: File) => {
-    flushSync(() => setUploadStatus("Uploading…"));
-    const formData = new FormData();
-    formData.append("path", currentPath.replace(/\/$/, "") + "/" + file.name.replace(/[/\\]/g, "_"));
-    formData.append("file", file);
-    try {
-      const res = await fetch(uploadAction, { method: "POST", headers: { "x-csrf-token": csrfToken }, body: formData });
-      if (res.ok) {
-        setUploadStatus("Uploaded.");
-        loadDir(currentPath);
-      } else {
-        setUploadStatus("Upload failed.");
+  const handleUpload = useCallback(
+    async (file: File) => {
+      flushSync(() => setUploadStatus("Uploading…"));
+      const formData = new FormData();
+      formData.append(
+        "path",
+        currentPath.replace(/\/$/, "") + "/" + file.name.replace(/[/\\]/g, "_"),
+      );
+      formData.append("file", file);
+      try {
+        const res = await fetch(uploadAction, {
+          method: "POST",
+          headers: { "x-csrf-token": csrfToken },
+          body: formData,
+        });
+        if (res.ok) {
+          setUploadStatus("Uploaded.");
+          loadDir(currentPath);
+        } else {
+          setUploadStatus("Upload failed.");
+        }
+      } catch {
+        setUploadStatus("Network error.");
       }
-    } catch {
-      setUploadStatus("Network error.");
-    }
-    uploadTimeoutRef.current = window.setTimeout(() => setUploadStatus(null), 3000);
-  }, [csrfToken, currentPath, uploadAction, loadDir]);
+      uploadTimeoutRef.current = window.setTimeout(
+        () => setUploadStatus(null),
+        3000,
+      );
+    },
+    [csrfToken, currentPath, uploadAction, loadDir],
+  );
 
   useEffect(() => {
     return () => {
@@ -92,7 +107,13 @@ export default function FileManager() {
           <input
             type="file"
             className="hidden"
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) { handleUpload(f); e.target.value = ""; } }}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) {
+                handleUpload(f);
+                e.target.value = "";
+              }
+            }}
           />
         </label>
       </div>
@@ -101,7 +122,9 @@ export default function FileManager() {
       <div className="flex items-center gap-1 border-b border-border px-3 py-1.5 text-xs text-muted-foreground">
         {breadcrumbParts.map((part, i) => (
           <React.Fragment key={i}>
-            {i > 0 && <ChevronRight className="h-3 w-3 flex-shrink-0 opacity-40" />}
+            {i > 0 && (
+              <ChevronRight className="h-3 w-3 flex-shrink-0 opacity-40" />
+            )}
             {part.path ? (
               <button
                 onClick={() => loadDir(part.path!)}
@@ -127,7 +150,11 @@ export default function FileManager() {
       <div
         className="flex-1 overflow-y-auto"
         onDragOver={(e) => e.preventDefault()}
-        onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleUpload(f); }}
+        onDrop={(e) => {
+          e.preventDefault();
+          const f = e.dataTransfer.files[0];
+          if (f) handleUpload(f);
+        }}
       >
         {loading ? (
           <div className="flex items-center justify-center py-8 text-xs text-muted-foreground">
@@ -139,14 +166,17 @@ export default function FileManager() {
           <>
             {currentPath !== uploadDir && (
               <FileRow
-                icon={<span className="text-muted-foreground opacity-60">‹</span>}
+                icon={
+                  <span className="text-muted-foreground opacity-60">‹</span>
+                }
                 name=".."
                 nameClass="text-muted-foreground"
                 onClick={() => loadDir(parentPath(currentPath, uploadDir))}
               />
             )}
             {entries.map((entry) => {
-              const entryPath = currentPath.replace(/\/$/, "") + "/" + entry.name;
+              const entryPath =
+                currentPath.replace(/\/$/, "") + "/" + entry.name;
               return entry.is_dir ? (
                 <FileRow
                   key={entry.name}
@@ -156,7 +186,7 @@ export default function FileManager() {
                   onClick={() => loadDir(entryPath)}
                   action={
                     <a
-                      href={`/sessions/${vmId}/download?path=${encodeURIComponent(entryPath)}`}
+                      href={`/download?path=${encodeURIComponent(entryPath)}`}
                       target="_blank"
                       rel="noreferrer"
                       title="Download as zip"
@@ -173,8 +203,17 @@ export default function FileManager() {
                   icon={<File className="h-3.5 w-3.5 text-muted-foreground" />}
                   name={entry.name}
                   nameClass="text-foreground"
-                  onClick={() => window.open(`/sessions/${vmId}/download?path=${encodeURIComponent(entryPath)}`, "_blank")}
-                  action={<span className="ml-1 text-[10px] text-muted-foreground opacity-50">{formatSize(entry.size)}</span>}
+                  onClick={() =>
+                    window.open(
+                      `/download?path=${encodeURIComponent(entryPath)}`,
+                      "_blank",
+                    )
+                  }
+                  action={
+                    <span className="ml-1 text-[10px] text-muted-foreground opacity-50">
+                      {formatSize(entry.size)}
+                    </span>
+                  }
                 />
               );
             })}

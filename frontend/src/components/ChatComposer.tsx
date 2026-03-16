@@ -4,7 +4,6 @@ import { useSse } from "../contexts/SseContext";
 
 interface ChatComposerProps {
   isLoading: boolean;
-  isOtherRunning?: boolean;
   onSend: (text: string) => void;
   onStop: () => void;
   focusKey?: number;
@@ -16,26 +15,34 @@ interface SlashCommand {
 }
 
 const SLASH_COMMANDS: SlashCommand[] = [
-  { name: "/help",        description: "Show help and available commands" },
-  { name: "/clear",       description: "Clear conversation history" },
-  { name: "/compact",     description: "Compact conversation with optional instructions" },
-  { name: "/config",      description: "Open config panel" },
-  { name: "/cost",        description: "Show token usage and cost" },
-  { name: "/doctor",      description: "Check Claude Code installation health" },
-  { name: "/init",        description: "Initialize project with CLAUDE.md" },
-  { name: "/login",       description: "Switch Anthropic accounts" },
-  { name: "/logout",      description: "Log out" },
-  { name: "/memory",      description: "Edit memory files" },
-  { name: "/mcp",         description: "Manage MCP servers" },
-  { name: "/model",       description: "Set or switch model" },
+  { name: "/help", description: "Show help and available commands" },
+  { name: "/clear", description: "Clear conversation history" },
+  {
+    name: "/compact",
+    description: "Compact conversation with optional instructions",
+  },
+  { name: "/config", description: "Open config panel" },
+  { name: "/cost", description: "Show token usage and cost" },
+  { name: "/doctor", description: "Check Claude Code installation health" },
+  { name: "/init", description: "Initialize project with CLAUDE.md" },
+  { name: "/login", description: "Switch Anthropic accounts" },
+  { name: "/logout", description: "Log out" },
+  { name: "/memory", description: "Edit memory files" },
+  { name: "/mcp", description: "Manage MCP servers" },
+  { name: "/model", description: "Set or switch model" },
   { name: "/pr_comments", description: "Get PR comments" },
-  { name: "/review",      description: "Request code review" },
-  { name: "/status",      description: "Show account / model status" },
-  { name: "/terminal",    description: "Run shell command" },
-  { name: "/vim",         description: "Enter vim mode" },
+  { name: "/review", description: "Request code review" },
+  { name: "/status", description: "Show account / model status" },
+  { name: "/terminal", description: "Run shell command" },
+  { name: "/vim", description: "Enter vim mode" },
 ];
 
-export default function ChatComposer({ isLoading, isOtherRunning, onSend, onStop, focusKey }: ChatComposerProps) {
+export default function ChatComposer({
+  isLoading,
+  onSend,
+  onStop,
+  focusKey,
+}: ChatComposerProps) {
   const { uploadAction, csrfToken, uploadDir } = useSse();
 
   const [input, setInput] = useState("");
@@ -60,17 +67,22 @@ export default function ChatComposer({ isLoading, isOtherRunning, onSend, onStop
   }, [isLoading]);
 
   const busy = isLoading || uploading;
-  const blocked = busy || (isOtherRunning ?? false);
+  const blocked = busy;
 
   const filteredCommands = input.startsWith("/")
-    ? SLASH_COMMANDS.filter((cmd) => cmd.name.startsWith(input.split(" ")[0].toLowerCase()))
+    ? SLASH_COMMANDS.filter((cmd) =>
+        cmd.name.startsWith(input.split(" ")[0].toLowerCase()),
+      )
     : [];
 
-  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? []);
-    setPendingFiles((prev) => [...prev, ...files]);
-    e.target.value = "";
-  }, []);
+  const handleFileSelect = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(e.target.files ?? []);
+      setPendingFiles((prev) => [...prev, ...files]);
+      e.target.value = "";
+    },
+    [],
+  );
 
   const removeFile = useCallback((idx: number) => {
     setPendingFiles((prev) => prev.filter((_, i) => i !== idx));
@@ -88,12 +100,26 @@ export default function ChatComposer({ isLoading, isOtherRunning, onSend, onStop
       const uploadedPaths: string[] = [];
       for (const file of pendingFiles) {
         const formData = new FormData();
-        formData.append("path", uploadDir.replace(/\/$/, "") + "/" + file.name.replace(/[/\\]/g, "_"));
+        formData.append(
+          "path",
+          uploadDir.replace(/\/$/, "") + "/" + file.name.replace(/[/\\]/g, "_"),
+        );
         formData.append("file", file);
         try {
-          const res = await fetch(uploadAction, { method: "POST", headers: { "x-csrf-token": csrfToken }, body: formData });
-          if (res.ok) uploadedPaths.push(uploadDir.replace(/\/$/, "") + "/" + file.name.replace(/[/\\]/g, "_"));
-        } catch (err) { console.error("File upload failed", err); }
+          const res = await fetch(uploadAction, {
+            method: "POST",
+            headers: { "x-csrf-token": csrfToken },
+            body: formData,
+          });
+          if (res.ok)
+            uploadedPaths.push(
+              uploadDir.replace(/\/$/, "") +
+                "/" +
+                file.name.replace(/[/\\]/g, "_"),
+            );
+        } catch (err) {
+          console.error("File upload failed", err);
+        }
       }
       setUploading(false);
       if (uploadedPaths.length > 0) {
@@ -110,7 +136,16 @@ export default function ChatComposer({ isLoading, isOtherRunning, onSend, onStop
     if (textareaRef.current) textareaRef.current.style.height = "auto";
     textareaRef.current?.focus();
     onSend(finalText);
-  }, [input, blocked, uploading, pendingFiles, uploadAction, csrfToken, uploadDir, onSend]);
+  }, [
+    input,
+    blocked,
+    uploading,
+    pendingFiles,
+    uploadAction,
+    csrfToken,
+    uploadDir,
+    onSend,
+  ]);
 
   const selectCommand = useCallback((cmd: SlashCommand) => {
     setInput(cmd.name + " ");
@@ -129,7 +164,9 @@ export default function ChatComposer({ isLoading, isOtherRunning, onSend, onStop
         }
         if (e.key === "ArrowUp") {
           e.preventDefault();
-          setSlashMenuIndex((i) => (i - 1 + filteredCommands.length) % filteredCommands.length);
+          setSlashMenuIndex(
+            (i) => (i - 1 + filteredCommands.length) % filteredCommands.length,
+          );
           return;
         }
         if (e.key === "Enter" || e.key === "Tab") {
@@ -148,7 +185,13 @@ export default function ChatComposer({ isLoading, isOtherRunning, onSend, onStop
         handleSend();
       }
     },
-    [slashMenuOpen, filteredCommands, slashMenuIndex, selectCommand, handleSend],
+    [
+      slashMenuOpen,
+      filteredCommands,
+      slashMenuIndex,
+      selectCommand,
+      handleSend,
+    ],
   );
 
   const handleInput = useCallback((e: React.FormEvent<HTMLTextAreaElement>) => {
@@ -167,7 +210,6 @@ export default function ChatComposer({ isLoading, isOtherRunning, onSend, onStop
     <div className="flex-shrink-0 border-t border-border bg-card/60 px-3 pb-3 pt-2">
       <div className="mx-auto max-w-3xl">
         <div className="relative">
-
           {/* Slash command menu */}
           {menuVisible && (
             <div className="absolute bottom-full left-0 right-0 mb-1.5 overflow-hidden rounded-xl border border-border bg-card shadow-xl">
@@ -175,13 +217,20 @@ export default function ChatComposer({ isLoading, isOtherRunning, onSend, onStop
                 <button
                   key={cmd.name}
                   type="button"
-                  onMouseDown={(e) => { e.preventDefault(); selectCommand(cmd); }}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    selectCommand(cmd);
+                  }}
                   className={`flex w-full items-baseline gap-3 px-3 py-2 text-left ${
                     i === slashMenuIndex ? "bg-accent" : "hover:bg-accent/60"
                   }`}
                 >
-                  <span className="font-mono text-xs font-medium text-foreground">{cmd.name}</span>
-                  <span className="truncate text-[11px] text-muted-foreground">{cmd.description}</span>
+                  <span className="font-mono text-xs font-medium text-foreground">
+                    {cmd.name}
+                  </span>
+                  <span className="truncate text-[11px] text-muted-foreground">
+                    {cmd.description}
+                  </span>
                 </button>
               ))}
             </div>
@@ -192,7 +241,7 @@ export default function ChatComposer({ isLoading, isOtherRunning, onSend, onStop
             <div className="mb-2 flex flex-wrap gap-1.5">
               {pendingFiles.map((file, i) => (
                 <span
-                  key={file.name + '-' + i}
+                  key={file.name + "-" + i}
                   className="flex items-center gap-1 rounded-full border border-border bg-muted px-2.5 py-0.5 text-xs text-foreground"
                 >
                   <Paperclip className="h-2.5 w-2.5 text-muted-foreground" />
@@ -211,7 +260,6 @@ export default function ChatComposer({ isLoading, isOtherRunning, onSend, onStop
 
           {/* Input row */}
           <div className="flex items-end gap-2 rounded-2xl border border-border bg-background px-3 py-2 shadow-sm focus-within:border-primary/40 focus-within:ring-1 focus-within:ring-primary/20">
-
             {/* File upload button */}
             <button
               type="button"
@@ -259,7 +307,9 @@ export default function ChatComposer({ isLoading, isOtherRunning, onSend, onStop
               <button
                 type="button"
                 onClick={handleSend}
-                disabled={blocked || (!input.trim() && pendingFiles.length === 0)}
+                disabled={
+                  blocked || (!input.trim() && pendingFiles.length === 0)
+                }
                 title="Send"
                 className="mb-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground hover:opacity-90 disabled:bg-muted disabled:text-muted-foreground"
               >

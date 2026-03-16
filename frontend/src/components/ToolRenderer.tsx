@@ -9,10 +9,18 @@ interface ToolRendererProps {
   toolResult?: ToolResult;
 }
 
-export default function ToolRenderer({ toolName, toolInput, toolResult }: ToolRendererProps) {
+export default function ToolRenderer({
+  toolName,
+  toolInput,
+  toolResult,
+}: ToolRendererProps) {
   return (
     <div className="my-0.5 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-      <ToolHeader toolName={toolName} toolInput={toolInput} toolResult={toolResult} />
+      <ToolHeader
+        toolName={toolName}
+        toolInput={toolInput}
+        toolResult={toolResult}
+      />
     </div>
   );
 }
@@ -20,13 +28,20 @@ export default function ToolRenderer({ toolName, toolInput, toolResult }: ToolRe
 type DiffBadge = "Edit" | "New" | "Patch";
 
 function isEditTool(toolName: string): boolean {
-  return toolName === "Edit" || toolName === "Write" || toolName === "ApplyPatch";
+  return (
+    toolName === "Edit" || toolName === "Write" || toolName === "ApplyPatch"
+  );
 }
 
 function getDiffProps(
   toolName: string,
   input: Record<string, unknown>,
-): { oldContent: string; newContent: string; filePath: string; badge: DiffBadge } | null {
+): {
+  oldContent: string;
+  newContent: string;
+  filePath: string;
+  badge: DiffBadge;
+} | null {
   if (toolName === "Edit") {
     return {
       filePath: String(input.file_path ?? ""),
@@ -63,7 +78,9 @@ function ToolHeader({
   toolInput: Record<string, unknown>;
   toolResult?: ToolResult;
 }) {
-  const diffProps = isEditTool(toolName) ? getDiffProps(toolName, toolInput) : null;
+  const diffProps = isEditTool(toolName)
+    ? getDiffProps(toolName, toolInput)
+    : null;
   const [open, setOpen] = React.useState(diffProps !== null);
   const summary = buildSummary(toolName, toolInput);
 
@@ -77,7 +94,9 @@ function ToolHeader({
         <span className="flex-1 truncate text-xs">
           <span className="font-medium text-muted-foreground">{toolName}</span>
           {summary && (
-            <span className="ml-2 font-mono text-[11px] text-foreground/60">{summary}</span>
+            <span className="ml-2 font-mono text-[11px] text-foreground/60">
+              {summary}
+            </span>
           )}
         </span>
         {open ? (
@@ -100,19 +119,33 @@ function ToolHeader({
           <ToolInputBody toolName={toolName} toolInput={toolInput} />
         </div>
       )}
-      {open && toolResult && !isEditTool(toolName) && <ToolResultView result={toolResult} />}
-      {open && toolResult?.isError && isEditTool(toolName) && <ToolResultView result={toolResult} />}
+      {open && toolResult && !isEditTool(toolName) && (
+        <ToolResultView result={toolResult} />
+      )}
+      {open && toolResult?.isError && isEditTool(toolName) && (
+        <ToolResultView result={toolResult} />
+      )}
     </div>
   );
 }
 
-function ToolInputBody({ toolName, toolInput }: { toolName: string; toolInput: Record<string, unknown> }) {
-  if (toolName === "Bash" || toolName === "shell") return <BashInputBody toolInput={toolInput} />;
-  if (toolName === "Grep")      return <GrepInputBody toolInput={toolInput} />;
-  if (toolName === "Glob")      return <GlobInputBody toolInput={toolInput} />;
-  if (toolName === "WebFetch")  return <WebFetchInputBody toolInput={toolInput} />;
-  if (toolName === "WebSearch") return <WebSearchInputBody toolInput={toolInput} />;
-  if (toolName === "TodoWrite" || toolName === "TodoRead") return <TodoInputBody toolInput={toolInput} />;
+function ToolInputBody({
+  toolName,
+  toolInput,
+}: {
+  toolName: string;
+  toolInput: Record<string, unknown>;
+}) {
+  if (toolName === "Bash" || toolName === "shell")
+    return <BashInputBody toolInput={toolInput} />;
+  if (toolName === "Grep") return <GrepInputBody toolInput={toolInput} />;
+  if (toolName === "Glob") return <GlobInputBody toolInput={toolInput} />;
+  if (toolName === "WebFetch")
+    return <WebFetchInputBody toolInput={toolInput} />;
+  if (toolName === "WebSearch")
+    return <WebSearchInputBody toolInput={toolInput} />;
+  if (toolName === "TodoWrite" || toolName === "TodoRead")
+    return <TodoInputBody toolInput={toolInput} />;
   return (
     <pre className="overflow-x-auto text-xs text-muted-foreground">
       {JSON.stringify(toolInput, null, 2)}
@@ -143,7 +176,9 @@ function GrepInputBody({ toolInput }: { toolInput: Record<string, unknown> }) {
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs">
       {typeof pattern === "string" && (
-        <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-foreground/80">/{pattern}/</code>
+        <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-foreground/80">
+          /{pattern}/
+        </code>
       )}
       {typeof path === "string" && (
         <span className="font-mono text-muted-foreground">{path}</span>
@@ -158,7 +193,9 @@ function GlobInputBody({ toolInput }: { toolInput: Record<string, unknown> }) {
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs">
       {typeof pattern === "string" && (
-        <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-foreground/80">{pattern}</code>
+        <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-foreground/80">
+          {pattern}
+        </code>
       )}
       {typeof path === "string" && (
         <span className="font-mono text-muted-foreground">{path}</span>
@@ -167,14 +204,22 @@ function GlobInputBody({ toolInput }: { toolInput: Record<string, unknown> }) {
   );
 }
 
-function WebFetchInputBody({ toolInput }: { toolInput: Record<string, unknown> }) {
+function WebFetchInputBody({
+  toolInput,
+}: {
+  toolInput: Record<string, unknown>;
+}) {
   const url = toolInput.url;
   return typeof url === "string" ? (
     <span className="break-all text-xs text-muted-foreground">{url}</span>
   ) : null;
 }
 
-function WebSearchInputBody({ toolInput }: { toolInput: Record<string, unknown> }) {
+function WebSearchInputBody({
+  toolInput,
+}: {
+  toolInput: Record<string, unknown>;
+}) {
   const query = toolInput.query;
   return typeof query === "string" ? (
     <span className="text-xs text-muted-foreground">{query}</span>
@@ -189,7 +234,10 @@ function TodoInputBody({ toolInput }: { toolInput: Record<string, unknown> }) {
         {todos.slice(0, 5).map((todo, i) => (
           <li key={i} className="truncate">
             {typeof todo === "object" && todo !== null
-              ? String((todo as Record<string, unknown>).content ?? JSON.stringify(todo))
+              ? String(
+                  (todo as Record<string, unknown>).content ??
+                    JSON.stringify(todo),
+                )
               : String(todo)}
           </li>
         ))}
@@ -211,7 +259,9 @@ function ToolResultView({ result }: { result: ToolResult }) {
   const isLong = result.content.length > 200;
 
   return (
-    <div className={`border-t border-border px-3 py-2 ${result.isError ? "bg-destructive/5" : "bg-muted/30"}`}>
+    <div
+      className={`border-t border-border px-3 py-2 ${result.isError ? "bg-destructive/5" : "bg-muted/30"}`}
+    >
       {result.isError && (
         <div className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-destructive">
           Error
@@ -252,7 +302,10 @@ function ToolResultView({ result }: { result: ToolResult }) {
   );
 }
 
-function buildSummary(toolName: string, input: Record<string, unknown>): string {
+function buildSummary(
+  toolName: string,
+  input: Record<string, unknown>,
+): string {
   if (toolName === "Bash" || toolName === "shell") {
     const cmd = input.command ?? input.cmd;
     if (typeof cmd === "string") return cmd.slice(0, 80);

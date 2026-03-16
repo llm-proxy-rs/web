@@ -113,7 +113,16 @@ async fn run_ssh_relay(guest_ip: Ipv4Addr, state: &AppState, ws: WebSocket) -> R
     let mut ssh_channel = open_terminal_channel(&mut ssh_handle)
         .await
         .context("open terminal channel failed")?;
-    let (mut ws_sender, mut ws_receiver) = ws.split();
+    let (mut ws_sender, ws_receiver) = ws.split();
+    let (ws_tx, mut ws_rx) = tokio::sync::mpsc::channel(4);
+    tokio::spawn(async move {
+        let mut ws_receiver = ws_receiver;
+        while let Some(msg) = ws_receiver.next().await {
+            if ws_tx.send(msg).await.is_err() {
+                break;
+            }
+        }
+    });
     let mut keepalive = tokio::time::interval(Duration::from_secs(30));
     keepalive.tick().await; // skip the immediate first tick
     loop {
@@ -121,7 +130,7 @@ async fn run_ssh_relay(guest_ip: Ipv4Addr, state: &AppState, ws: WebSocket) -> R
             msg = ssh_channel.wait() => {
                 if !relay_ssh_to_ws(msg, &mut ws_sender).await { break; }
             }
-            ws_msg = ws_receiver.next() => {
+            ws_msg = ws_rx.recv() => {
                 if !relay_ws_to_ssh(ws_msg, &mut ssh_channel, &mut ws_sender).await { break; }
             }
             _ = keepalive.tick() => {

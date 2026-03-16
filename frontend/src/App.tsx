@@ -27,7 +27,9 @@ class ErrorBoundary extends React.Component<
         <div className="flex h-screen w-screen items-center justify-center bg-background text-foreground">
           <div className="max-w-md space-y-2 p-6 text-center">
             <p className="text-sm font-medium">Something went wrong</p>
-            <p className="font-mono text-xs text-muted-foreground">{this.state.error.message}</p>
+            <p className="font-mono text-xs text-muted-foreground">
+              {this.state.error.message}
+            </p>
           </div>
         </div>
       );
@@ -37,10 +39,21 @@ class ErrorBoundary extends React.Component<
 }
 
 function AppContent() {
-  const { hasUserRootfs, csrfToken, conversations, createConversation, deleteConversation, deleteSession, syncConversationsFromHistory } = useSse();
+  const {
+    hasUserRootfs,
+    csrfToken,
+    conversations,
+    createConversation,
+    deleteConversation,
+    deleteSession,
+    syncConversationsFromHistory,
+  } = useSse();
   const [activeTab, setActiveTab] = useState<ViewTab>("chat");
-  const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
-  const [runningConversationId, setRunningConversationId] = useState<string | null>(null);
+  const [selectedConversation, setSelectedConversation] =
+    useState<Conversation | null>(null);
+  const [runningConversationIds, setRunningConversationIds] = useState<
+    Set<string>
+  >(new Set());
   const [newChatKey, setNewChatKey] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
   const [darkMode, setDarkMode] = useState<boolean>(() => {
@@ -64,20 +77,25 @@ function AppContent() {
     setNewChatKey((k) => k + 1);
   }, []);
 
-  const handleDeleteConversation = useCallback(async (conversation: Conversation) => {
-    try {
-      if (conversation.sessionId && conversation.projectDir) {
-        await deleteSession(conversation.sessionId, conversation.projectDir);
+  const handleDeleteConversation = useCallback(
+    async (conversation: Conversation) => {
+      try {
+        if (conversation.sessionId && conversation.projectDir) {
+          await deleteSession(conversation.sessionId, conversation.projectDir);
+        }
+      } catch (err) {
+        console.error("Failed to delete session from server", err);
+        return;
       }
-    } catch (err) {
-      console.error("Failed to delete session from server", err);
-      return;
-    }
-    deleteConversation(conversation.conversationId);
-    if (selectedConversation?.conversationId === conversation.conversationId) {
-      setSelectedConversation(null);
-    }
-  }, [deleteSession, deleteConversation, selectedConversation]);
+      deleteConversation(conversation.conversationId);
+      if (
+        selectedConversation?.conversationId === conversation.conversationId
+      ) {
+        setSelectedConversation(null);
+      }
+    },
+    [deleteSession, deleteConversation, selectedConversation],
+  );
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background">
@@ -95,11 +113,13 @@ function AppContent() {
         <Sidebar
           conversations={conversations}
           viewConversationId={selectedConversation?.conversationId ?? null}
-          runningConversationId={runningConversationId}
+          runningConversationIds={runningConversationIds}
           onSelectConversation={setSelectedConversation}
           onNewChat={handleNewChat}
           onDeleteConversation={handleDeleteConversation}
-          onRefresh={() => { syncConversationsFromHistory().catch(console.error); }}
+          onRefresh={() => {
+            syncConversationsFromHistory().catch(console.error);
+          }}
         />
       )}
 
@@ -108,7 +128,7 @@ function AppContent() {
           <ChatInterface
             selectedConversation={selectedConversation}
             newChatKey={newChatKey}
-            onRunningConversationChange={setRunningConversationId}
+            onRunningConversationChange={setRunningConversationIds}
             onConversationCreated={setSelectedConversation}
           />
         )}

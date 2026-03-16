@@ -18,7 +18,9 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
   const [apiKey, setApiKey] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [saveResult, setSaveResult] = useState<"success" | "error" | null>(null);
+  const [saveResult, setSaveResult] = useState<"success" | "error" | null>(
+    null,
+  );
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const loadSettings = useCallback(async (signal?: AbortSignal) => {
@@ -27,7 +29,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
     try {
       const res = await fetch("/api/settings", { signal });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json() as SettingsData;
+      const data = (await res.json()) as SettingsData;
       setSettings(data);
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
@@ -50,10 +52,13 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
     try {
       const res = await fetch("/api/settings", {
         method: "PUT",
-        headers: { "Content-Type": "application/json", "x-csrf-token": csrfToken },
+        headers: {
+          "Content-Type": "application/json",
+          "x-csrf-token": csrfToken,
+        },
         body: JSON.stringify({ api_key: apiKey.trim() }),
       });
-      if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
+      if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
       setSaveResult("success");
       setApiKey("");
       await loadSettings();
@@ -85,7 +90,9 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
 
         <div className="p-4">
           {loading ? (
-            <div className="py-6 text-center text-sm text-muted-foreground">Loading…</div>
+            <div className="py-6 text-center text-sm text-muted-foreground">
+              Loading…
+            </div>
           ) : loadError ? (
             <div className="rounded-lg border border-red-500/30 bg-red-950/20 px-3 py-2 text-sm text-red-300">
               {loadError}
@@ -109,7 +116,9 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
               {settings.base_url && (
                 <div className="text-xs text-muted-foreground">
                   Base URL:{" "}
-                  <span className="font-mono text-foreground">{settings.base_url}</span>
+                  <span className="font-mono text-foreground">
+                    {settings.base_url}
+                  </span>
                 </div>
               )}
             </div>
@@ -170,7 +179,9 @@ function ApiKeySection({
         <p className="text-xs text-emerald-500">API key saved successfully.</p>
       )}
       {saveResult === "error" && (
-        <p className="text-xs text-red-400">Failed to save. Please try again.</p>
+        <p className="text-xs text-red-400">
+          Failed to save. Please try again.
+        </p>
       )}
     </div>
   );

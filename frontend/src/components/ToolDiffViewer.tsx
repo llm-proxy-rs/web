@@ -16,16 +16,29 @@ const BADGE_STYLES: Record<ToolDiffViewerProps["badge"], string> = {
 
 const MAX_DIFF_LINES = 200;
 
-export default function ToolDiffViewer({ oldContent, newContent, filePath, badge }: ToolDiffViewerProps) {
+export default function ToolDiffViewer({
+  oldContent,
+  newContent,
+  filePath,
+  badge,
+}: ToolDiffViewerProps) {
   const diffLines = computeDiffLines(oldContent, newContent);
-  const truncated = oldContent.split("\n").length > MAX_DIFF_LINES || newContent.split("\n").length > MAX_DIFF_LINES;
+  const truncated =
+    oldContent.split("\n").length > MAX_DIFF_LINES ||
+    newContent.split("\n").length > MAX_DIFF_LINES;
 
   return (
     <div className="overflow-hidden rounded-b-lg">
       <div className="flex items-center gap-2 border-t border-border bg-muted/30 px-3 py-1.5">
         <FileText className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
-        <span className="flex-1 truncate font-mono text-[11px] text-muted-foreground">{filePath}</span>
-        <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${BADGE_STYLES[badge]}`}>{badge}</span>
+        <span className="flex-1 truncate font-mono text-[11px] text-muted-foreground">
+          {filePath}
+        </span>
+        <span
+          className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${BADGE_STYLES[badge]}`}
+        >
+          {badge}
+        </span>
       </div>
       {truncated && (
         <div className="border-t border-border bg-yellow-500/10 px-3 py-1 text-[11px] text-yellow-400">
@@ -56,15 +69,23 @@ function DiffLine({ line }: { line: DiffLine }) {
   const { bg, text, prefix } = DIFF_LINE_STYLE[line.type];
   return (
     <tr className={bg}>
-      <td className={`select-none whitespace-pre px-2 py-0 text-right ${text} opacity-50`} style={{ minWidth: "1.5rem" }}>
+      <td
+        className={`select-none whitespace-pre px-2 py-0 text-right ${text} opacity-50`}
+        style={{ minWidth: "1.5rem" }}
+      >
         {prefix}
       </td>
-      <td className={`whitespace-pre-wrap break-all px-2 py-0 ${text}`}>{line.content || " "}</td>
+      <td className={`whitespace-pre-wrap break-all px-2 py-0 ${text}`}>
+        {line.content || " "}
+      </td>
     </tr>
   );
 }
 
-const DIFF_LINE_STYLE: Record<DiffLineType, { bg: string; text: string; prefix: string }> = {
+const DIFF_LINE_STYLE: Record<
+  DiffLineType,
+  { bg: string; text: string; prefix: string }
+> = {
   added: { bg: "bg-green-500/10", text: "text-green-400", prefix: "+" },
   removed: { bg: "bg-red-500/10", text: "text-red-400", prefix: "−" },
   context: { bg: "", text: "text-muted-foreground", prefix: " " },
@@ -72,10 +93,14 @@ const DIFF_LINE_STYLE: Record<DiffLineType, { bg: string; text: string; prefix: 
 
 function computeDiffLines(oldContent: string, newContent: string): DiffLine[] {
   if (!oldContent && newContent) {
-    return newContent.split("\n").map((content) => ({ type: "added", content }));
+    return newContent
+      .split("\n")
+      .map((content) => ({ type: "added", content }));
   }
   if (oldContent && !newContent) {
-    return oldContent.split("\n").map((content) => ({ type: "removed", content }));
+    return oldContent
+      .split("\n")
+      .map((content) => ({ type: "removed", content }));
   }
 
   const oldLines = oldContent.split("\n");
@@ -100,7 +125,10 @@ function computeDiffLines(oldContent: string, newContent: string): DiffLine[] {
       oldIdx++;
       newIdx++;
       lcsIdx++;
-    } else if (newIdx < newLines.length && (lcsIdx >= lcs.length || newLines[newIdx] !== lcs[lcsIdx])) {
+    } else if (
+      newIdx < newLines.length &&
+      (lcsIdx >= lcs.length || newLines[newIdx] !== lcs[lcsIdx])
+    ) {
       result.push({ type: "added", content: newLines[newIdx] });
       newIdx++;
     } else if (oldIdx < oldLines.length) {
@@ -119,7 +147,9 @@ function computeLCS(a: string[], b: string[]): string[] {
   const bSlice = b.slice(0, maxLines);
   const m = aSlice.length;
   const n = bSlice.length;
-  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  const dp: number[][] = Array.from({ length: m + 1 }, () =>
+    new Array(n + 1).fill(0),
+  );
 
   for (let i = 1; i <= m; i++) {
     for (let j = 1; j <= n; j++) {

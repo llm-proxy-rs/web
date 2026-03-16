@@ -162,7 +162,7 @@ test.describe("navigation during streaming", () => {
 
   // ── Cross-session navigation ───────────────────────────────────────────────
 
-  test("UF-41 viewing a non-running session disables the composer while another session is streaming", async ({
+  test("UF-41 viewing a non-running session enables the composer while another session is streaming", async ({
     page,
   }) => {
     const ctrl = await setupApp(page, {
@@ -177,9 +177,9 @@ test.describe("navigation during streaming", () => {
     await page.getByText("Other Chat").click();
 
     // isCurrentRunning=false for this conversation → no status bar
-    // isOtherRunning=true → composer is disabled to prevent cross-session routing
+    // The composer should be enabled so the user can start a new task here
     await expect(page.getByRole("status")).not.toBeVisible();
-    await expect(page.getByPlaceholder("Message Claude…")).toBeDisabled();
+    await expect(page.getByPlaceholder("Message Claude…")).toBeEnabled();
   });
 
   test("UF-42 clicking an existing session while a pending-session stream is running hides the status bar", async ({
@@ -233,16 +233,20 @@ test.describe("navigation during streaming", () => {
     await sendMessage(page, "Long task");
     await expect(page.getByRole("status")).toBeVisible();
 
-    // init fires → thinking indicator added
-    ctrl.sendSseEvents([{ event: "init" }]);
+    // session_start + init fires → thinking indicator added
+    ctrl.sendSseEvents([
+      { event: "session_start", data: { task_id: "task-uf44" } },
+      { event: "init" },
+    ]);
     await expect(page.locator(".thinking-dot").first()).toBeVisible();
 
     // Navigate away — thinking indicator hidden
     await page.getByRole("button", { name: "New Chat" }).click();
     await expect(page.locator(".thinking-dot").first()).not.toBeVisible();
 
-    // Return to the running session — thinking indicator reappears
+    // Return to the running session — status bar confirms view switched
     await page.getByText("Running Session").click();
+    await expect(page.getByRole("status")).toBeVisible();
     await expect(page.locator(".thinking-dot").first()).toBeVisible();
   });
 
@@ -280,7 +284,7 @@ test.describe("navigation during streaming", () => {
     await expect(page.getByText("Answer for A")).toBeVisible();
   });
 
-  test("UF-46 composer re-enables after the running session completes while viewing a different session", async ({
+  test("UF-46 composer stays enabled in another session while a different session is streaming", async ({
     page,
   }) => {
     const sessA = makeSession({ session_id: "sess-a", title: "Session A" });
@@ -296,15 +300,15 @@ test.describe("navigation during streaming", () => {
     await page.getByText("Session A").click();
     await sendMessage(page, "Question for A");
 
-    // Navigate to Session B — composer is disabled while Session A is running
+    // Navigate to Session B — composer is enabled even while Session A is running
     await page.getByText("Session B").click();
-    await expect(page.getByPlaceholder("Message Claude…")).toBeDisabled();
+    await expect(page.getByPlaceholder("Message Claude…")).toBeEnabled();
 
     // Session A's stream completes
     ctrl.setSessions([sessA, sessB]);
     ctrl.sendSseEvents(sse.text("Answer for A", "sess-a"));
 
-    // Composer in Session B re-enables now that no session is running
+    // Composer in Session B remains enabled
     await expect(page.getByPlaceholder("Message Claude…")).toBeEnabled();
   });
 });

@@ -9,7 +9,10 @@ interface ChatMessagesPaneProps {
   isLoading: boolean;
 }
 
-export default function ChatMessagesPane({ messages, isLoading }: ChatMessagesPaneProps) {
+export default function ChatMessagesPane({
+  messages,
+  isLoading,
+}: ChatMessagesPaneProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const userScrolledRef = useRef(false);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
@@ -49,11 +52,18 @@ export default function ChatMessagesPane({ messages, isLoading }: ChatMessagesPa
 
   if (messages.length === 0 && !isLoading) {
     return (
-      <div ref={scrollRef} className="flex flex-1 items-center justify-center overflow-y-auto">
+      <div
+        ref={scrollRef}
+        className="flex flex-1 items-center justify-center overflow-y-auto"
+      >
         <div className="text-center">
           <div className="mb-4 text-5xl opacity-10">◈</div>
-          <p className="text-sm font-medium text-muted-foreground">Start a new conversation</p>
-          <p className="mt-1 text-xs text-muted-foreground/50">Type a message below to begin</p>
+          <p className="text-sm font-medium text-muted-foreground">
+            Start a new conversation
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground/50">
+            Type a message below to begin
+          </p>
         </div>
       </div>
     );

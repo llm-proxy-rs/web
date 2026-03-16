@@ -12,11 +12,16 @@ import ClaudeStatus from "./ClaudeStatus";
 interface ChatInterfaceProps {
   selectedConversation: Conversation | null;
   newChatKey?: number;
-  onRunningConversationChange?: (conversationId: string | null) => void;
+  onRunningConversationChange?: (runningIds: Set<string>) => void;
   onConversationCreated?: (conversation: Conversation) => void;
 }
 
-export default function ChatInterface({ selectedConversation, newChatKey = 0, onRunningConversationChange, onConversationCreated }: ChatInterfaceProps) {
+export default function ChatInterface({
+  selectedConversation,
+  newChatKey = 0,
+  onRunningConversationChange,
+  onConversationCreated,
+}: ChatInterfaceProps) {
   const sseCtx = useSse();
   const {
     conversations,
@@ -34,10 +39,10 @@ export default function ChatInterface({ selectedConversation, newChatKey = 0, on
   const {
     viewConversationId,
     setViewConversationId,
-    runningConversationId,
-    setRunningConversationId,
-    isStreaming,
-    setIsStreaming,
+    runningConversationIds,
+    addRunningConversation,
+    removeRunningConversation,
+    isConversationRunning,
     getSessionPendingQuestion,
     setSessionPendingQuestion,
     getTaskId,
@@ -76,18 +81,25 @@ export default function ChatInterface({ selectedConversation, newChatKey = 0, on
     chatState,
   );
 
-  const loadTranscriptForConversation = useCallback(async (conversation: Conversation, signal?: AbortSignal) => {
-    if (!conversation.sessionId || !conversation.projectDir) return;
-    if (getMessages(conversation.conversationId).length > 0) return;
-    try {
-      const transcript = await loadTranscript(conversation.sessionId, conversation.projectDir, signal);
-      const msgs = buildMessagesFromTranscript(transcript);
-      setMessages(conversation.conversationId, msgs);
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") return;
-      console.error("Failed to load transcript", err);
-    }
-  }, [loadTranscript, getMessages, setMessages]);
+  const loadTranscriptForConversation = useCallback(
+    async (conversation: Conversation, signal?: AbortSignal) => {
+      if (!conversation.sessionId || !conversation.projectDir) return;
+      if (getMessages(conversation.conversationId).length > 0) return;
+      try {
+        const transcript = await loadTranscript(
+          conversation.sessionId,
+          conversation.projectDir,
+          signal,
+        );
+        const msgs = buildMessagesFromTranscript(transcript);
+        setMessages(conversation.conversationId, msgs);
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        console.error("Failed to load transcript", err);
+      }
+    },
+    [loadTranscript, getMessages, setMessages],
+  );
 
   useEffect(() => {
     if (!selectedConversation) {
@@ -101,7 +113,9 @@ export default function ChatInterface({ selectedConversation, newChatKey = 0, on
     loadTranscriptForConversation(selectedConversation, abortController.signal);
 
     // Restore any pending question for this conversation
-    const storedQuestion = getQuestionsForConversation(selectedConversation.conversationId);
+    const storedQuestion = getQuestionsForConversation(
+      selectedConversation.conversationId,
+    );
     if (storedQuestion) {
       setSessionPendingQuestion(selectedConversation.conversationId, {
         requestId: storedQuestion.requestId,
@@ -113,67 +127,103 @@ export default function ChatInterface({ selectedConversation, newChatKey = 0, on
     setComposerFocusKey((k) => k + 1);
 
     return () => abortController.abort();
-  }, [selectedConversation, setViewConversationId, loadTranscriptForConversation, getQuestionsForConversation, setSessionPendingQuestion]);
+  }, [
+    selectedConversation,
+    setViewConversationId,
+    loadTranscriptForConversation,
+    getQuestionsForConversation,
+    setSessionPendingQuestion,
+  ]);
 
   const onRunningConversationChangeRef = useRef(onRunningConversationChange);
   onRunningConversationChangeRef.current = onRunningConversationChange;
   useEffect(() => {
-    onRunningConversationChangeRef.current?.(runningConversationId);
-  }, [runningConversationId]);
+    onRunningConversationChangeRef.current?.(runningConversationIds);
+  }, [runningConversationIds]);
 
-  const handleSend = useCallback((text: string) => {
-    let effectiveConversationId = viewConversationId;
-    if (!effectiveConversationId) {
-      const newConv = sseCtx.createConversation();
-      effectiveConversationId = newConv.conversationId;
-      setViewConversationId(effectiveConversationId);
-      sseCtx.updateConversation(newConv.conversationId, { title: text.split("\n")[0].slice(0, 80).trim() });
-      onConversationCreated?.(newConv);
-    }
+  const handleSend = useCallback(
+    (text: string) => {
+      let effectiveConversationId = viewConversationId;
+      if (!effectiveConversationId) {
+        const newConv = sseCtx.createConversation();
+        effectiveConversationId = newConv.conversationId;
+        setViewConversationId(effectiveConversationId);
+        sseCtx.updateConversation(newConv.conversationId, {
+          title: text.split("\n")[0].slice(0, 80).trim(),
+        });
+        onConversationCreated?.(newConv);
+      }
 
-    const conversation = conversations.find((c) => c.conversationId === effectiveConversationId);
-    const sessionId = conversation?.sessionId;
+      const conversation = conversations.find(
+        (c) => c.conversationId === effectiveConversationId,
+      );
+      const sessionId = conversation?.sessionId;
 
-    addMessage(effectiveConversationId, {
-      id: generateId(),
-      type: "user",
-      content: text,
-      timestamp: Date.now(),
-    });
-    setRunningConversationId(effectiveConversationId);
-    setIsStreaming(true);
+      addMessage(effectiveConversationId, {
+        id: generateId(),
+        type: "user",
+        content: text,
+        timestamp: Date.now(),
+      });
+      addRunningConversation(effectiveConversationId);
 
-    sseCtx.sendQuery(text, effectiveConversationId, sessionId);
-  }, [viewConversationId, conversations, generateId, addMessage, setRunningConversationId, setIsStreaming, setViewConversationId, onConversationCreated, sseCtx]);
+      sseCtx.sendQuery(text, effectiveConversationId, sessionId);
+    },
+    [
+      viewConversationId,
+      conversations,
+      generateId,
+      addMessage,
+      addRunningConversation,
+      setViewConversationId,
+      onConversationCreated,
+      sseCtx,
+    ],
+  );
 
   const handleStop = useCallback(() => {
-    sseCtx.sendStop(getTaskId(runningConversationId) ?? "").catch(console.error);
-  }, [sseCtx, getTaskId, runningConversationId]);
+    if (!viewConversationId) return;
+    sseCtx.sendStop(getTaskId(viewConversationId) ?? "").catch(console.error);
+  }, [sseCtx, getTaskId, viewConversationId]);
 
   const handleAnswerQuestion = useCallback(
     async (requestId: string, answers: Record<string, string>) => {
-      const taskId = getSessionPendingQuestion(viewConversationId)?.taskId ?? "";
+      const taskId =
+        getSessionPendingQuestion(viewConversationId)?.taskId ?? "";
       setSessionPendingQuestion(viewConversationId, null);
       clearQuestion(requestId);
       await sseCtx.answerQuestion(taskId, requestId, answers);
     },
-    [sseCtx, setSessionPendingQuestion, getSessionPendingQuestion, viewConversationId, clearQuestion],
+    [
+      sseCtx,
+      setSessionPendingQuestion,
+      getSessionPendingQuestion,
+      viewConversationId,
+      clearQuestion,
+    ],
   );
 
   const handleSkipQuestion = useCallback(
     async (requestId: string) => {
-      const taskId = getSessionPendingQuestion(viewConversationId)?.taskId ?? "";
+      const taskId =
+        getSessionPendingQuestion(viewConversationId)?.taskId ?? "";
       setSessionPendingQuestion(viewConversationId, null);
       clearQuestion(requestId);
       await sseCtx.answerQuestion(taskId, requestId, {});
     },
-    [sseCtx, setSessionPendingQuestion, getSessionPendingQuestion, viewConversationId, clearQuestion],
+    [
+      sseCtx,
+      setSessionPendingQuestion,
+      getSessionPendingQuestion,
+      viewConversationId,
+      clearQuestion,
+    ],
   );
 
   const messages = getMessages(viewConversationId);
   const pendingQuestion = getSessionPendingQuestion(viewConversationId);
-  const isCurrentRunning = isStreaming && runningConversationId === viewConversationId;
-  const isOtherRunning = isStreaming && runningConversationId !== viewConversationId;
+  const isCurrentRunning =
+    viewConversationId !== null && isConversationRunning(viewConversationId);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -192,7 +242,6 @@ export default function ChatInterface({ selectedConversation, newChatKey = 0, on
       ) : (
         <ChatComposer
           isLoading={isCurrentRunning}
-          isOtherRunning={isOtherRunning}
           onSend={handleSend}
           onStop={handleStop}
           focusKey={composerFocusKey}

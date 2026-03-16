@@ -10,13 +10,19 @@ function loadConversationsFromStorage(vmId: string): Conversation[] {
   }
 }
 
-function saveConversationsToStorage(vmId: string, conversations: Conversation[]): void {
+function saveConversationsToStorage(
+  vmId: string,
+  conversations: Conversation[],
+): void {
   localStorage.setItem(`conversations_${vmId}`, JSON.stringify(conversations));
 }
 
-export function useConversations(vmId: string, loadHistory: () => Promise<ChatSession[]>) {
+export function useConversations(
+  vmId: string,
+  loadHistory: () => Promise<ChatSession[]>,
+) {
   const [conversations, setConversations] = useState<Conversation[]>(() =>
-    loadConversationsFromStorage(vmId)
+    loadConversationsFromStorage(vmId),
   );
 
   const createConversation = useCallback((): Conversation => {
@@ -32,21 +38,29 @@ export function useConversations(vmId: string, loadHistory: () => Promise<ChatSe
     return conversation;
   }, [vmId]);
 
-  const updateConversation = useCallback((id: string, update: Partial<Conversation>) => {
-    setConversations((prev) => {
-      const updated = prev.map((c) => (c.conversationId === id ? { ...c, ...update } : c));
-      saveConversationsToStorage(vmId, updated);
-      return updated;
-    });
-  }, [vmId]);
+  const updateConversation = useCallback(
+    (id: string, update: Partial<Conversation>) => {
+      setConversations((prev) => {
+        const updated = prev.map((c) =>
+          c.conversationId === id ? { ...c, ...update } : c,
+        );
+        saveConversationsToStorage(vmId, updated);
+        return updated;
+      });
+    },
+    [vmId],
+  );
 
-  const deleteConversation = useCallback((id: string) => {
-    setConversations((prev) => {
-      const updated = prev.filter((c) => c.conversationId !== id);
-      saveConversationsToStorage(vmId, updated);
-      return updated;
-    });
-  }, [vmId]);
+  const deleteConversation = useCallback(
+    (id: string) => {
+      setConversations((prev) => {
+        const updated = prev.filter((c) => c.conversationId !== id);
+        saveConversationsToStorage(vmId, updated);
+        return updated;
+      });
+    },
+    [vmId],
+  );
 
   const syncConversationsFromHistory = useCallback(async () => {
     const sessions = await loadHistory();

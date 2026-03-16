@@ -11,7 +11,9 @@ import type {
   SseToolStart,
 } from "../types";
 
-export function parseSseBlock(part: string): { eventName: string; data: string } | null {
+export function parseSseBlock(
+  part: string,
+): { eventName: string; data: string } | null {
   let eventName = "";
   let data = "";
   for (const line of part.split("\n")) {
@@ -50,13 +52,19 @@ export function dispatchSseEvent(
       pushEvent({ type: "text_delta", payload: payload as SseTextDelta });
       break;
     case "thinking_delta":
-      pushEvent({ type: "thinking_delta", payload: payload as SseThinkingDelta });
+      pushEvent({
+        type: "thinking_delta",
+        payload: payload as SseThinkingDelta,
+      });
       break;
     case "tool_start":
       pushEvent({ type: "tool_start", payload: payload as SseToolStart });
       break;
     case "ask_user_question":
-      pushEvent({ type: "ask_user_question", payload: payload as SseAskUserQuestion });
+      pushEvent({
+        type: "ask_user_question",
+        payload: payload as SseAskUserQuestion,
+      });
       break;
     case "tool_result":
       pushEvent({ type: "tool_result", payload: payload as SseToolResult });
@@ -116,14 +124,45 @@ export function attachEventSourceListeners(
       return undefined;
     }
   };
-  add("task_created", (e) => { const p = safeParse(e.data); if (p !== undefined) pushEvent({ type: "task_created", payload: p as SseTaskCreated }); });
-  add("session_start", (e) => { const p = safeParse(e.data); if (p !== undefined) pushEvent({ type: "session_start", payload: p as SseSessionStart }); });
+  add("task_created", (e) => {
+    const p = safeParse(e.data);
+    if (p !== undefined)
+      pushEvent({ type: "task_created", payload: p as SseTaskCreated });
+  });
+  add("session_start", (e) => {
+    const p = safeParse(e.data);
+    if (p !== undefined)
+      pushEvent({ type: "session_start", payload: p as SseSessionStart });
+  });
   add("init", () => pushEvent({ type: "init" }));
-  add("text_delta", (e) => { const p = safeParse(e.data); if (p !== undefined) pushEvent({ type: "text_delta", payload: p as SseTextDelta }); });
-  add("thinking_delta", (e) => { const p = safeParse(e.data); if (p !== undefined) pushEvent({ type: "thinking_delta", payload: p as SseThinkingDelta }); });
-  add("tool_start", (e) => { const p = safeParse(e.data); if (p !== undefined) pushEvent({ type: "tool_start", payload: p as SseToolStart }); });
-  add("ask_user_question", (e) => { const p = safeParse(e.data); if (p !== undefined) pushEvent({ type: "ask_user_question", payload: p as SseAskUserQuestion }); });
-  add("tool_result", (e) => { const p = safeParse(e.data); if (p !== undefined) pushEvent({ type: "tool_result", payload: p as SseToolResult }); });
+  add("text_delta", (e) => {
+    const p = safeParse(e.data);
+    if (p !== undefined)
+      pushEvent({ type: "text_delta", payload: p as SseTextDelta });
+  });
+  add("thinking_delta", (e) => {
+    const p = safeParse(e.data);
+    if (p !== undefined)
+      pushEvent({ type: "thinking_delta", payload: p as SseThinkingDelta });
+  });
+  add("tool_start", (e) => {
+    const p = safeParse(e.data);
+    if (p !== undefined)
+      pushEvent({ type: "tool_start", payload: p as SseToolStart });
+  });
+  add("ask_user_question", (e) => {
+    const p = safeParse(e.data);
+    if (p !== undefined)
+      pushEvent({
+        type: "ask_user_question",
+        payload: p as SseAskUserQuestion,
+      });
+  });
+  add("tool_result", (e) => {
+    const p = safeParse(e.data);
+    if (p !== undefined)
+      pushEvent({ type: "tool_result", payload: p as SseToolResult });
+  });
   add("done", (e) => {
     const p = safeParse(e.data);
     if (p === undefined) return;

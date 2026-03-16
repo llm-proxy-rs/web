@@ -1,12 +1,21 @@
-import type { ChatMessage, ContentBlock, ToolMessage, TranscriptMessage } from "../types";
+import type {
+  ChatMessage,
+  ContentBlock,
+  ToolMessage,
+  TranscriptMessage,
+} from "../types";
 
-function extractToolResultContent(raw: string | ContentBlock[] | undefined): string {
+function extractToolResultContent(
+  raw: string | ContentBlock[] | undefined,
+): string {
   if (!raw) return "";
   if (typeof raw === "string") return raw;
   return raw.map((b) => b.text ?? "").join("");
 }
 
-export function buildMessagesFromTranscript(transcript: TranscriptMessage[]): ChatMessage[] {
+export function buildMessagesFromTranscript(
+  transcript: TranscriptMessage[],
+): ChatMessage[] {
   const messages: ChatMessage[] = [];
   let id = 0;
   const nextId = () => `t${id++}`;
@@ -39,17 +48,30 @@ export function buildMessagesFromTranscript(transcript: TranscriptMessage[]): Ch
           }
         }
         // Also collect any plain text from user turns
-        const text = blocks.map((b) => (b.type === "text" ? b.text ?? "" : "")).join("");
+        const text = blocks
+          .map((b) => (b.type === "text" ? (b.text ?? "") : ""))
+          .join("");
         if (text.trim()) {
-          messages.push({ id: nextId(), type: "user", content: text, timestamp: Date.now() });
+          messages.push({
+            id: nextId(),
+            type: "user",
+            content: text,
+            timestamp: Date.now(),
+          });
         }
       } else if (typeof entry.content === "string" && entry.content.trim()) {
-        messages.push({ id: nextId(), type: "user", content: entry.content, timestamp: Date.now() });
+        messages.push({
+          id: nextId(),
+          type: "user",
+          content: entry.content,
+          timestamp: Date.now(),
+        });
       }
     } else if (role === "assistant") {
-      const blocks = typeof entry.content === "string"
-        ? [{ type: "text", text: entry.content }]
-        : entry.content;
+      const blocks =
+        typeof entry.content === "string"
+          ? [{ type: "text", text: entry.content }]
+          : entry.content;
 
       for (const block of blocks) {
         if (block.type === "thinking" && block.thinking) {

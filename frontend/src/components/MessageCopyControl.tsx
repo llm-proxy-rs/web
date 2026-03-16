@@ -24,7 +24,10 @@ function convertMarkdownToPlainText(markdown: string): string {
   text = text.replace(/~~(.*?)~~/g, "$1");
   text = text.replace(/<\/?[^>]+(>|$)/g, "");
   text = text.replace(/\n{3,}/g, "\n\n");
-  text = text.replace(/@@CODEBLOCK(\d+)@@/g, (_match, index: string) => codeBlocks[Number(index)] ?? "");
+  text = text.replace(
+    /@@CODEBLOCK(\d+)@@/g,
+    (_match, index: string) => codeBlocks[Number(index)] ?? "",
+  );
   return text.trim();
 }
 
@@ -33,9 +36,14 @@ interface MessageCopyControlProps {
   messageType: "user" | "assistant";
 }
 
-export default function MessageCopyControl({ content, messageType }: MessageCopyControlProps) {
+export default function MessageCopyControl({
+  content,
+  messageType,
+}: MessageCopyControlProps) {
   const canSelectFormat = messageType === "assistant";
-  const [selectedFormat, setSelectedFormat] = useState<CopyFormat>(canSelectFormat ? "markdown" : "text");
+  const [selectedFormat, setSelectedFormat] = useState<CopyFormat>(
+    canSelectFormat ? "markdown" : "text",
+  );
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -45,7 +53,10 @@ export default function MessageCopyControl({ content, messageType }: MessageCopy
   useEffect(() => {
     const closeOnOutsideClick = (event: MouseEvent) => {
       if (!isDropdownOpen) return;
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(event.target as Node)
+      ) {
         setIsDropdownOpen(false);
       }
     };
@@ -71,11 +82,17 @@ export default function MessageCopyControl({ content, messageType }: MessageCopy
       setCopied(true);
       setCopyFailed(false);
       if (timerRef.current) clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(() => setCopied(false), COPY_SUCCESS_TIMEOUT_MS);
+      timerRef.current = setTimeout(
+        () => setCopied(false),
+        COPY_SUCCESS_TIMEOUT_MS,
+      );
     } catch {
       setCopyFailed(true);
       if (timerRef.current) clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(() => setCopyFailed(false), COPY_SUCCESS_TIMEOUT_MS);
+      timerRef.current = setTimeout(
+        () => setCopyFailed(false),
+        COPY_SUCCESS_TIMEOUT_MS,
+      );
     }
   };
 
@@ -117,7 +134,9 @@ export default function MessageCopyControl({ content, messageType }: MessageCopy
             <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
           </svg>
         )}
-        <span className="text-[10px] font-semibold uppercase tracking-wide">{formatTag}</span>
+        <span className="text-[10px] font-semibold uppercase tracking-wide">
+          {formatTag}
+        </span>
       </button>
 
       {canSelectFormat && (
@@ -135,7 +154,12 @@ export default function MessageCopyControl({ content, messageType }: MessageCopy
               stroke="currentColor"
               viewBox="0 0 24 24"
             >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M19 9l-7 7-7-7"
+              />
             </svg>
           </button>
 
