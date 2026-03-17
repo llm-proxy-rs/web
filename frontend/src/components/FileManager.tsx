@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { ChevronRight, Download, Folder, File, Upload } from "lucide-react";
+import { ChevronRight, Download, Folder, File, PanelRightClose, Upload } from "lucide-react";
 import { useSse } from "../contexts/SseContext";
 import type { FileEntry } from "../types";
 
@@ -17,7 +17,7 @@ function parentPath(path: string, rootPath: string): string {
   return parent.length < rootPath.length ? rootPath : parent;
 }
 
-export default function FileManager() {
+export default function FileManager({ onClose }: { onClose?: () => void }) {
   const { uploadDir, uploadAction, csrfToken } = useSse();
   const [currentPath, setCurrentPath] = useState(uploadDir);
   const [entries, setEntries] = useState<FileEntry[]>([]);
@@ -98,24 +98,35 @@ export default function FileManager() {
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-3 py-2">
         <span className="text-sm font-semibold text-foreground">Files</span>
-        <label
-          className="flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-          title="Upload file"
-        >
-          <Upload className="h-3.5 w-3.5" />
-          Upload
-          <input
-            type="file"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) {
-                handleUpload(f);
-                e.target.value = "";
-              }
-            }}
-          />
-        </label>
+        <div className="flex items-center gap-1">
+          <label
+            className="flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+            title="Upload file"
+          >
+            <Upload className="h-3.5 w-3.5" />
+            Upload
+            <input
+              type="file"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) {
+                  handleUpload(f);
+                  e.target.value = "";
+                }
+              }}
+            />
+          </label>
+          {onClose && (
+            <button
+              title="Hide files"
+              onClick={onClose}
+              className="flex items-center justify-center rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+            >
+              <PanelRightClose className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Breadcrumb */}

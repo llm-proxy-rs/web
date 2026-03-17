@@ -1,4 +1,5 @@
 import React, { useCallback, useState } from "react";
+import { FolderOpen } from "lucide-react";
 import { SseProvider, useSse } from "./contexts/SseContext";
 import IconRail from "./components/IconRail";
 import Sidebar from "./components/Sidebar";
@@ -56,6 +57,7 @@ function AppContent() {
   >(new Set());
   const [newChatKey, setNewChatKey] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
+  const [showFiles, setShowFiles] = useState(true);
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     const saved = localStorage.getItem("ui-theme");
     return saved ? saved === "dark" : true;
@@ -139,9 +141,19 @@ function AppContent() {
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             <Terminal visible={activeTab === "terminal"} />
           </div>
-          <div className="flex min-h-0 w-80 flex-col border-l border-border/40">
-            <FileManager />
-          </div>
+          {showFiles ? (
+            <div className="flex min-h-0 w-80 flex-col border-l border-border/40">
+              <FileManager onClose={() => setShowFiles(false)} />
+            </div>
+          ) : (
+            <button
+              title="Show files"
+              onClick={() => setShowFiles(true)}
+              className="flex w-8 flex-col items-center justify-center border-l border-border/40 bg-card text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <FolderOpen className="h-4 w-4" />
+            </button>
+          )}
         </div>
       </main>
 
