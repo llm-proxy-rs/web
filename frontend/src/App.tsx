@@ -134,15 +134,14 @@ function AppContent() {
         )}
         <div
           style={{ display: activeTab === "terminal" ? "flex" : "none" }}
-          className="min-h-0 flex-1 flex-col"
+          className="min-h-0 flex-1"
         >
-          <Terminal visible={activeTab === "terminal"} />
-        </div>
-        <div
-          style={{ display: activeTab === "files" ? "flex" : "none" }}
-          className="min-h-0 flex-1 flex-col"
-        >
-          <FileManager />
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <Terminal visible={activeTab === "terminal"} />
+          </div>
+          <div className="flex min-h-0 w-80 flex-col border-l border-border/40">
+            <FileManager />
+          </div>
         </div>
       </main>
 

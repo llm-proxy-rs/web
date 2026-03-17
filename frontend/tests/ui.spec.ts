@@ -1,6 +1,6 @@
 /**
  * UF-15  Dark mode toggle   — clicking toggle applies light mode
- * UF-16  Tab navigation     — Terminal and Files tabs show correct panels
+ * UF-16  Tab navigation     — Terminal tab shows terminal and files panels
  * UF-17  Slash commands     — typing "/" opens menu; selecting fills composer
  */
 import { test, expect } from "@playwright/test";
@@ -24,24 +24,20 @@ test.describe("ui", () => {
   });
 
   test("UF-16 tab navigation shows correct panels", async ({ page }) => {
-    await setupApp(page);
+    await setupApp(page, { files: { "/tmp": [] } });
 
     // Chat tab is active by default — composer is visible
     const composer = page.getByPlaceholder("Message Claude…");
     await expect(composer).toBeVisible();
 
-    // Navigate to Terminal tab
+    // Navigate to Terminal tab — shows terminal and files panel together
     const terminalTab = page.getByTitle("Terminal");
     await terminalTab.click();
     // Terminal panel is present (renders a black bg container)
     await expect(page.locator(".bg-black").first()).toBeVisible();
-    // Chat composer is hidden
-    await expect(composer).not.toBeVisible();
-
-    // Navigate to Files tab
-    const filesTab = page.getByTitle("Files");
-    await filesTab.click();
+    // Files panel is visible within the terminal tab
     await expect(page.getByText("Files")).toBeVisible();
+    // Chat composer is hidden
     await expect(composer).not.toBeVisible();
 
     // Navigate back to Chat tab

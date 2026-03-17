@@ -176,4 +176,4 @@ export interface FileEntry {
   size: number;
 }
 
-export type ViewTab = "chat" | "terminal" | "files";
+export type ViewTab = "chat" | "terminal";

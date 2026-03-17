@@ -1,6 +1,5 @@
 import React from "react";
 import {
-  FolderOpen,
   LogOut,
   MessageSquare,
   Moon,
@@ -45,13 +44,6 @@ export default function IconRail({
         onClick={() => onTabChange("terminal")}
       >
         <Terminal className="h-4 w-4" />
-      </NavButton>
-      <NavButton
-        active={activeTab === "files"}
-        title="Files"
-        onClick={() => onTabChange("files")}
-      >
-        <FolderOpen className="h-4 w-4" />
       </NavButton>
 
       <div className="mt-auto flex flex-col items-center gap-0.5">
