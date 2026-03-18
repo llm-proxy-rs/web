@@ -33,12 +33,6 @@ const MessageComponent = memo(
           onMouseEnter={() => setHovered(true)}
           onMouseLeave={() => setHovered(false)}
         >
-          {hovered && (
-            <MessageCopyControl
-              content={message.content}
-              messageType="user"
-            />
-          )}
           <span className="mb-1 flex-shrink-0 text-[10px] text-muted-foreground/50">
             {formattedTime}
           </span>
@@ -49,6 +43,12 @@ const MessageComponent = memo(
               </div>
             </div>
           </div>
+          {hovered && (
+            <MessageCopyControl
+              content={message.content}
+              messageType="user"
+            />
+          )}
         </div>
       );
     }
@@ -125,14 +125,6 @@ const MessageComponent = memo(
             <span className="text-[10px] text-muted-foreground/60">
               {formattedTime}
             </span>
-            <div className="ml-auto">
-              {hovered && (
-                <MessageCopyControl
-                  content={message.content}
-                  messageType="assistant"
-                />
-              )}
-            </div>
           </div>
         )}
         <div
@@ -143,16 +135,18 @@ const MessageComponent = memo(
         >
           <MarkdownContent content={message.content} />
         </div>
-        {isGrouped && (
-          <div
-            className={`flex justify-end pt-0.5 pl-[34px] transition-opacity duration-150 ${hovered ? "opacity-100" : "opacity-0 pointer-events-none"}`}
-          >
-            <MessageCopyControl
-              content={message.content}
-              messageType="assistant"
-            />
-          </div>
-        )}
+        <div
+          className={twMerge(
+            "flex pt-0.5 transition-opacity duration-150",
+            isGrouped ? "" : "pl-[34px]",
+            hovered ? "opacity-100" : "opacity-0 pointer-events-none",
+          )}
+        >
+          <MessageCopyControl
+            content={message.content}
+            messageType="assistant"
+          />
+        </div>
       </div>
     );
   },

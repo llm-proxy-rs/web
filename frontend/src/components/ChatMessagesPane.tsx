@@ -80,6 +80,7 @@ export default function ChatMessagesPane({
         onScroll={handleScroll}
         className="h-full space-y-1 overflow-y-auto py-4"
       >
+        <div className="mx-auto max-w-4xl">
         {messages.map((message, index) => {
           const prevMessage = index > 0 ? messages[index - 1] : null;
           return (
@@ -91,6 +92,7 @@ export default function ChatMessagesPane({
           );
         })}
         <ClaudeStatus isLoading={isLoading} onAbort={onAbort} />
+        </div>
       </div>
 
       {showScrollBtn && (
