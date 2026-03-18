@@ -66,6 +66,19 @@ export default function ChatComposer({
     }
   }, [isLoading]);
 
+  // Global Esc key handler — textarea is disabled during streaming, so onKeyDown won't fire
+  useEffect(() => {
+    if (!isLoading) return;
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onStop();
+      }
+    };
+    window.addEventListener("keydown", handleEsc);
+    return () => window.removeEventListener("keydown", handleEsc);
+  }, [isLoading, onStop]);
+
   const busy = isLoading || uploading;
   const blocked = busy;
 
@@ -286,7 +299,7 @@ export default function ChatComposer({
               placeholder="Message Claude…"
               disabled={blocked}
               rows={1}
-              className="max-h-[260px] min-h-[32px] flex-1 resize-none self-center bg-transparent text-sm text-foreground placeholder-muted-foreground/50 focus:outline-none disabled:opacity-60"
+              className="max-h-[260px] min-h-[32px] flex-1 resize-none bg-transparent py-[5px] text-sm leading-snug text-foreground placeholder-muted-foreground/50 focus:outline-none disabled:opacity-60"
               style={{ height: "32px" }}
             />
 
