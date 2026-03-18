@@ -8,7 +8,6 @@ const ACTION_WORDS = [
   "Computing",
   "Reasoning",
 ];
-const ANIMATION_STEPS = 40;
 
 function formatElapsedTime(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60);
@@ -27,7 +26,6 @@ export default function ClaudeStatus({
   onAbort,
 }: ClaudeStatusProps) {
   const [elapsedTime, setElapsedTime] = useState(0);
-  const [animationPhase, setAnimationPhase] = useState(0);
 
   useEffect(() => {
     if (!isLoading) {
@@ -41,19 +39,10 @@ export default function ClaudeStatus({
     return () => window.clearInterval(timer);
   }, [isLoading]);
 
-  useEffect(() => {
-    if (!isLoading) return;
-    const timer = window.setInterval(() => {
-      setAnimationPhase((prev) => (prev + 1) % ANIMATION_STEPS);
-    }, 500);
-    return () => window.clearInterval(timer);
-  }, [isLoading]);
-
   if (!isLoading) return null;
 
   const actionIndex = Math.floor(elapsedTime / 3) % ACTION_WORDS.length;
   const statusText = ACTION_WORDS[actionIndex];
-  const animatedDots = ".".repeat((animationPhase % 3) + 1);
   const elapsedLabel =
     elapsedTime > 0
       ? `${formatElapsedTime(elapsedTime)} elapsed`
@@ -84,10 +73,12 @@ export default function ClaudeStatus({
                     Live
                   </span>
                 </div>
-                <p className="text-sm font-semibold text-foreground">
+                <p className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
                   {statusText}
-                  <span aria-hidden="true" className="text-primary">
-                    {animatedDots}
+                  <span className="flex items-center gap-[3px] pl-0.5" aria-hidden="true">
+                    <span className="thinking-dot h-1 w-1 rounded-full bg-primary" />
+                    <span className="thinking-dot h-1 w-1 rounded-full bg-primary" />
+                    <span className="thinking-dot h-1 w-1 rounded-full bg-primary" />
                   </span>
                 </p>
                 <div className="mt-0.5 flex items-center text-[11px] text-muted-foreground">

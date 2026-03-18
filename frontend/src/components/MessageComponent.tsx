@@ -68,11 +68,7 @@ const MessageComponent = memo(
 
     if (message.type === "assistant" && message.isThinking) {
       if (!message.content) {
-        return (
-          <div className="px-4 py-1">
-            <ThinkingIndicator />
-          </div>
-        );
+        return null;
       }
       return (
         <div className="px-4 py-0.5">
@@ -180,20 +176,5 @@ function MarkdownContent({ content }: { content: string }) {
     >
       {content}
     </ReactMarkdown>
-  );
-}
-
-function ThinkingIndicator() {
-  return (
-    <div className="flex items-center gap-2.5">
-      <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-primary text-[9px] font-bold tracking-wider text-primary-foreground">
-        AI
-      </div>
-      <div className="flex items-center gap-1 rounded-full bg-muted px-3 py-1.5">
-        <span className="thinking-dot h-1.5 w-1.5 rounded-full bg-muted-foreground" />
-        <span className="thinking-dot h-1.5 w-1.5 rounded-full bg-muted-foreground" />
-        <span className="thinking-dot h-1.5 w-1.5 rounded-full bg-muted-foreground" />
-      </div>
-    </div>
   );
 }
