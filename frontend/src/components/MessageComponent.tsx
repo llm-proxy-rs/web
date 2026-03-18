@@ -37,19 +37,21 @@ const MessageComponent = memo(
           onMouseEnter={() => setHovered(true)}
           onMouseLeave={() => setHovered(false)}
         >
-          <div className="max-w-[75%] sm:max-w-lg">
+          <div className="relative max-w-[75%] sm:max-w-lg">
+            {hovered && (
+              <div className="absolute -left-8 top-1">
+                <MessageCopyControl
+                  content={message.content}
+                  messageType="user"
+                />
+              </div>
+            )}
             <div className="rounded-2xl rounded-br-sm bg-primary px-4 py-2.5 text-sm text-primary-foreground shadow-sm">
               <div className="whitespace-pre-wrap break-words leading-relaxed">
                 {message.content}
               </div>
             </div>
-            <div className="mt-0.5 flex items-center justify-end gap-1.5 pr-0.5">
-              {hovered && (
-                <MessageCopyControl
-                  content={message.content}
-                  messageType="user"
-                />
-              )}
+            <div className="mt-0.5 pr-0.5 text-right">
               <span className="text-[10px] text-muted-foreground/50">
                 {formattedTime}
               </span>
@@ -71,34 +73,7 @@ const MessageComponent = memo(
     }
 
     if (message.type === "assistant" && message.isThinking) {
-      if (!message.content) {
-        return null;
-      }
-      return (
-        <div className="px-4 py-0.5">
-          <details className="group">
-            <summary className="flex cursor-pointer list-none items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">
-              <svg
-                className="h-3 w-3 transition-transform group-open:rotate-90"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 5l7 7-7 7"
-                />
-              </svg>
-              Thinking…
-            </summary>
-            <div className="mt-2 border-l-2 border-border pl-3 text-xs leading-relaxed text-muted-foreground">
-              <div className="whitespace-pre-wrap">{message.content}</div>
-            </div>
-          </details>
-        </div>
-      );
+      return null;
     }
 
     if (message.type === "tool") {
@@ -131,29 +106,34 @@ const MessageComponent = memo(
             <span className="text-[10px] text-muted-foreground/60">
               {formattedTime}
             </span>
+            {hovered && (
+              <div className="ml-auto">
+                <MessageCopyControl
+                  content={message.content}
+                  messageType="assistant"
+                />
+              </div>
+            )}
           </div>
         )}
-        <div
-          className={twMerge(
-            "min-w-0 overflow-x-auto text-sm leading-relaxed text-foreground",
-            isGrouped ? "" : "pl-[34px]",
+        <div className="relative">
+          {isGrouped && hovered && (
+            <div className="absolute -left-7 top-0">
+              <MessageCopyControl
+                content={message.content}
+                messageType="assistant"
+              />
+            </div>
           )}
-        >
-          <MarkdownContent content={message.content} />
-        </div>
-        {hovered && (
           <div
             className={twMerge(
-              "flex pt-0.5",
+              "min-w-0 overflow-x-auto text-sm leading-relaxed text-foreground",
               isGrouped ? "" : "pl-[34px]",
             )}
           >
-            <MessageCopyControl
-              content={message.content}
-              messageType="assistant"
-            />
+            <MarkdownContent content={message.content} />
           </div>
-        )}
+        </div>
       </div>
     );
   },
