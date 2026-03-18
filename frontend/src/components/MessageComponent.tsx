@@ -107,12 +107,10 @@ const MessageComponent = memo(
               {formattedTime}
             </span>
             {hovered && (
-              <div className="ml-auto">
-                <MessageCopyControl
-                  content={message.content}
-                  messageType="assistant"
-                />
-              </div>
+              <MessageCopyControl
+                content={message.content}
+                messageType="assistant"
+              />
             )}
           </div>
         )}
