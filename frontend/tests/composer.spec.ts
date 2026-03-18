@@ -52,6 +52,9 @@ test.describe("composer", () => {
 
     await expect(page.getByText("Here is my response.")).toBeVisible();
 
+    // Before hovering — copy button is NOT in the DOM (no invisible block)
+    await expect(page.getByTitle("Copy", { exact: true })).not.toBeVisible();
+
     // Hover over the message text — the copy button becomes visible
     await page.getByText("Here is my response.").hover();
     await expect(page.getByTitle("Copy", { exact: true })).toBeVisible();

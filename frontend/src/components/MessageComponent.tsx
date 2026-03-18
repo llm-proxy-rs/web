@@ -135,18 +135,19 @@ const MessageComponent = memo(
         >
           <MarkdownContent content={message.content} />
         </div>
-        <div
-          className={twMerge(
-            "flex pt-0.5 transition-opacity duration-150",
-            isGrouped ? "" : "pl-[34px]",
-            hovered ? "opacity-100" : "opacity-0 pointer-events-none",
-          )}
-        >
-          <MessageCopyControl
-            content={message.content}
-            messageType="assistant"
-          />
-        </div>
+        {hovered && (
+          <div
+            className={twMerge(
+              "flex pt-0.5",
+              isGrouped ? "" : "pl-[34px]",
+            )}
+          >
+            <MessageCopyControl
+              content={message.content}
+              messageType="assistant"
+            />
+          </div>
+        )}
       </div>
     );
   },
