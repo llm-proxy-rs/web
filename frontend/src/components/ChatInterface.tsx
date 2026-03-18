@@ -7,7 +7,6 @@ import { buildMessagesFromTranscript } from "../utils/transcript";
 import AskUserQuestionPanel from "./AskUserQuestionPanel";
 import ChatComposer from "./ChatComposer";
 import ChatMessagesPane from "./ChatMessagesPane";
-import ClaudeStatus from "./ClaudeStatus";
 
 interface ChatInterfaceProps {
   selectedConversation: Conversation | null;
@@ -227,8 +226,7 @@ export default function ChatInterface({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <ChatMessagesPane messages={messages} isLoading={isCurrentRunning} />
-      <ClaudeStatus isLoading={isCurrentRunning} onAbort={handleStop} />
+      <ChatMessagesPane messages={messages} isLoading={isCurrentRunning} onAbort={handleStop} />
       {pendingQuestion ? (
         <div className="flex-shrink-0 border-t border-border p-4">
           <div className="mx-auto max-w-3xl">

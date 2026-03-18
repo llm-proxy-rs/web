@@ -60,7 +60,7 @@ export default function ClaudeStatus({
       : "Starting now";
 
   return (
-    <div className="px-3 pb-2">
+    <div className="px-4 py-2">
       <div className="mx-auto max-w-3xl">
         <div className="relative overflow-hidden rounded-2xl border border-border/70 bg-card/90 shadow-md backdrop-blur-md">
           <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-primary/10 via-transparent to-sky-500/10" />
