@@ -1,6 +1,6 @@
 /**
- * UF-18  Empty directory     — Files tab shows "Empty directory" when no entries
- * UF-19  File listing        — Files tab lists file names and formatted sizes
+ * UF-18  Empty directory     — Terminal tab files panel shows "Empty directory" when no entries
+ * UF-19  File listing        — Terminal tab files panel lists file names and formatted sizes
  * UF-20  Navigate into dir   — clicking a directory loads its contents
  * UF-21  Breadcrumb nav      — clicking Home in breadcrumb returns to root
  * UF-22  File upload         — selecting a file shows "Uploading…" then "Uploaded."
@@ -12,7 +12,7 @@ test.describe("files", () => {
   test("UF-18 empty directory shows empty state", async ({ page }) => {
     await setupApp(page, { files: { "/tmp": [] } });
 
-    await page.getByTitle("Files").click();
+    await page.getByTitle("Terminal").click();
 
     await expect(page.getByText("Empty directory")).toBeVisible();
   });
@@ -28,7 +28,7 @@ test.describe("files", () => {
       },
     });
 
-    await page.getByTitle("Files").click();
+    await page.getByTitle("Terminal").click();
 
     await expect(page.getByText("report.txt")).toBeVisible();
     await expect(page.getByText("2.0 KB")).toBeVisible();
@@ -46,7 +46,7 @@ test.describe("files", () => {
       },
     });
 
-    await page.getByTitle("Files").click();
+    await page.getByTitle("Terminal").click();
 
     // Click the "docs" folder
     await page.getByText("docs").click();
@@ -65,7 +65,7 @@ test.describe("files", () => {
       },
     });
 
-    await page.getByTitle("Files").click();
+    await page.getByTitle("Terminal").click();
 
     // Navigate into the logs directory
     await page.getByText("logs").click();
@@ -81,7 +81,7 @@ test.describe("files", () => {
   test("UF-22 uploading a file shows status and then clears", async ({ page }) => {
     await setupApp(page, { files: { "/tmp": [] } });
 
-    await page.getByTitle("Files").click();
+    await page.getByTitle("Terminal").click();
     // Wait for the FileManager to finish its initial directory load
     await expect(page.getByText("Empty directory")).toBeVisible();
 

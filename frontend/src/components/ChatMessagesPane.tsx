@@ -1,17 +1,20 @@
 import React, { useEffect, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import type { ChatMessage } from "../types";
+import ClaudeStatus from "./ClaudeStatus";
 import MessageComponent from "./MessageComponent";
 import MessageErrorBoundary from "./MessageErrorBoundary";
 
 interface ChatMessagesPaneProps {
   messages: ChatMessage[];
   isLoading: boolean;
+  onAbort?: () => void;
 }
 
 export default function ChatMessagesPane({
   messages,
   isLoading,
+  onAbort,
 }: ChatMessagesPaneProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const userScrolledRef = useRef(false);
@@ -22,7 +25,7 @@ export default function ChatMessagesPane({
     const el = scrollRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [messages.length]);
+  }, [messages.length, isLoading]);
 
   const handleWheel = () => {
     const el = scrollRef.current;
@@ -77,6 +80,7 @@ export default function ChatMessagesPane({
         onScroll={handleScroll}
         className="h-full space-y-1 overflow-y-auto py-4"
       >
+        <div className="mx-auto max-w-4xl">
         {messages.map((message, index) => {
           const prevMessage = index > 0 ? messages[index - 1] : null;
           return (
@@ -87,6 +91,8 @@ export default function ChatMessagesPane({
             </div>
           );
         })}
+        <ClaudeStatus isLoading={isLoading} onAbort={onAbort} />
+        </div>
       </div>
 
       {showScrollBtn && (

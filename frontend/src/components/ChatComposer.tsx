@@ -66,6 +66,19 @@ export default function ChatComposer({
     }
   }, [isLoading]);
 
+  // Global Esc key handler — textarea is disabled during streaming, so onKeyDown won't fire
+  useEffect(() => {
+    if (!isLoading) return;
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onStop();
+      }
+    };
+    window.addEventListener("keydown", handleEsc);
+    return () => window.removeEventListener("keydown", handleEsc);
+  }, [isLoading, onStop]);
+
   const busy = isLoading || uploading;
   const blocked = busy;
 
@@ -259,14 +272,14 @@ export default function ChatComposer({
           )}
 
           {/* Input row */}
-          <div className="flex items-end gap-2 rounded-2xl border border-border bg-background px-3 py-2 shadow-sm focus-within:border-primary/40 focus-within:ring-1 focus-within:ring-primary/20">
+          <div className="flex items-center gap-2 rounded-2xl border border-border bg-background px-3 py-2 shadow-sm focus-within:border-primary/40 focus-within:ring-1 focus-within:ring-primary/20">
             {/* File upload button */}
             <button
               type="button"
               title="Attach file"
               onClick={() => fileInputRef.current?.click()}
               disabled={blocked}
-              className="mb-1 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
+              className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
             >
               <Paperclip className="h-4 w-4" />
             </button>
@@ -286,12 +299,12 @@ export default function ChatComposer({
               placeholder="Message Claude…"
               disabled={blocked}
               rows={1}
-              className="max-h-[260px] min-h-[36px] flex-1 resize-none bg-transparent py-1 text-sm text-foreground placeholder-muted-foreground/50 focus:outline-none disabled:opacity-60"
-              style={{ height: "36px" }}
+              className="max-h-[260px] min-h-[32px] flex-1 resize-none bg-transparent py-[5px] text-sm leading-snug text-foreground placeholder-muted-foreground/50 focus:outline-none disabled:opacity-60"
+              style={{ height: "32px" }}
             />
 
             {uploading ? (
-              <div className="mb-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-muted">
+              <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-muted">
                 <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-border border-t-primary" />
               </div>
             ) : busy ? (
@@ -299,7 +312,7 @@ export default function ChatComposer({
                 type="button"
                 onClick={onStop}
                 title="Stop (Esc)"
-                className="mb-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-destructive text-destructive-foreground hover:opacity-90"
+                className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-destructive text-destructive-foreground hover:opacity-90"
               >
                 <Square className="h-3.5 w-3.5" />
               </button>
@@ -311,7 +324,7 @@ export default function ChatComposer({
                   blocked || (!input.trim() && pendingFiles.length === 0)
                 }
                 title="Send"
-                className="mb-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground hover:opacity-90 disabled:bg-muted disabled:text-muted-foreground"
+                className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground hover:opacity-90 disabled:bg-muted disabled:text-muted-foreground"
               >
                 <Send className="h-3.5 w-3.5" />
               </button>

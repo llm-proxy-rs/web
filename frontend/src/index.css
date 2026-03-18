@@ -2,6 +2,7 @@
 @import "@xterm/xterm/css/xterm.css";
 
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
 @config "../tailwind.config.js";
 
 /* ── Dark mode (default) ──────────────────────────────────────── */
@@ -112,7 +113,7 @@ select,
   scrollbar-color: rgba(127, 137, 156, 0.28) transparent;
 }
 
-/* ── Prose ────────────────────────────────────────────────────── */
+/* ── Prose theme overrides ────────────────────────────────────── */
 .prose pre {
   background-color: hsl(var(--muted));
   border: 1px solid hsl(var(--border));
