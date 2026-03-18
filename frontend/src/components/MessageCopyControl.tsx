@@ -101,7 +101,11 @@ export default function MessageCopyControl({
       ? "text-blue-100 hover:text-white"
       : "text-muted-foreground hover:text-foreground";
 
-  const formatTag = selectedFormat === "markdown" ? "MD" : "TXT";
+  const formatTag = canSelectFormat
+    ? selectedFormat === "markdown"
+      ? "MD"
+      : "TXT"
+    : null;
 
   return (
     <div ref={dropdownRef} className="relative flex items-center gap-0.5">
@@ -134,9 +138,11 @@ export default function MessageCopyControl({
             <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
           </svg>
         )}
-        <span className="text-[10px] font-semibold uppercase tracking-wide">
-          {formatTag}
-        </span>
+        {formatTag && (
+          <span className="text-[10px] font-semibold uppercase tracking-wide">
+            {formatTag}
+          </span>
+        )}
       </button>
 
       {canSelectFormat && (
@@ -164,7 +170,7 @@ export default function MessageCopyControl({
           </button>
 
           {isDropdownOpen && (
-            <div className="absolute left-auto top-full z-30 mt-1 min-w-36 rounded-md border border-border bg-card p-1 shadow-lg">
+            <div className="absolute bottom-full right-0 z-30 mb-1 min-w-36 rounded-md border border-border bg-card p-1 shadow-lg">
               {(["markdown", "text"] as CopyFormat[]).map((fmt) => (
                 <button
                   key={fmt}
