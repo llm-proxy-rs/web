@@ -2,7 +2,7 @@
  * UF-30  Shift+Enter        — inserts newline in composer without submitting
  * UF-31  SSE error event    — error message shown in chat, streaming cleared
  * UF-32  Copy button hover  — hovering an assistant message reveals copy button
- * UF-33  Copy format picker — format dropdown shows markdown / text options
+ * UF-33  Code block copy    — code blocks show language header and copy button
  * UF-56  New Chat auto-focus — clicking "New Chat" puts focus on the composer textarea
  * UF-57  Post-send focus    — after sending a message the composer textarea regains focus
  * UF-58  Session select focus — switching to a history session focuses the composer textarea
@@ -60,26 +60,18 @@ test.describe("composer", () => {
     await expect(page.getByTitle("Copy", { exact: true })).toBeVisible();
   });
 
-  test("UF-33 copy format dropdown shows markdown and plain-text options", async ({ page }) => {
+  test("UF-33 code block shows language header and copy button", async ({ page }) => {
     const ctrl = await setupApp(page, {});
 
-    await sendMessage(page, "Hello");
-    ctrl.sendSseEvents(sse.text("**Bold** response", "sess-1"));
+    await sendMessage(page, "Show me code");
+    ctrl.sendSseEvents(sse.text("Here is code:\n\n```python\nprint('hello')\n```", "sess-code"));
 
-    await expect(page.getByText("Bold").first()).toBeVisible();
-
-    // Hover to reveal copy controls then open the format picker
-    await page.getByText("Bold").first().hover();
-    await page.getByTitle("Select copy format").click();
-
-    await expect(page.getByText("Copy as markdown")).toBeVisible();
-    await expect(page.getByText("Copy as text")).toBeVisible();
-
-    // Switching to text format updates the button label
-    await page.getByText("Copy as text").click();
-    await expect(page.getByTitle("Copy", { exact: true })).toBeVisible();
-    // Format label on the button switches to TXT
-    await expect(page.locator("button[title='Copy'] span").filter({ hasText: "TXT" })).toBeVisible();
+    // Code content visible
+    await expect(page.getByText("print('hello')")).toBeVisible();
+    // Language label in code block header
+    await expect(page.getByText("python")).toBeVisible();
+    // Copy button in code block header
+    await expect(page.getByTitle("Copy code")).toBeVisible();
   });
 
   test("UF-56 clicking New Chat focuses the composer textarea", async ({ page }) => {
