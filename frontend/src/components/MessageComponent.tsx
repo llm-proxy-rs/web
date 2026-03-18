@@ -1,6 +1,7 @@
 import React, { memo, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkBreaks from "remark-breaks";
 import rehypeSanitize from "rehype-sanitize";
 import { twMerge } from "tailwind-merge";
 import type { ChatMessage } from "../types";
@@ -233,7 +234,7 @@ function MarkdownContent({ content }: { content: string }) {
   }
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={[remarkGfm, remarkBreaks]}
       rehypePlugins={[rehypeSanitize]}
       className="prose prose-sm max-w-none dark:prose-invert prose-code:text-sm"
       components={{ pre: CodeBlock }}
