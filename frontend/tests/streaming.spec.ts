@@ -1,6 +1,7 @@
 /**
  * UF-06  Empty thinking removed  — animated dots gone when no thinking_delta arrives
  * UF-07  Thinking block shown    — collapsible "Thinking…" when thinking content present
+ * UF-07b Claude header after thinking — assistant text after thinking shows Claude header
  * UF-08  Tool use with result    — tool card shows result after tool_result event
  * UF-09  Stop streaming          — Stop button sends stop request
  * UF-10  Ask user question       — panel shown; selecting an option and submitting works
@@ -39,6 +40,20 @@ test.describe("streaming", () => {
     // The collapsible <details> summary shows "Thinking…"
     await expect(page.getByText("Thinking…")).toBeVisible();
     // The assistant response is also shown
+    await expect(page.getByText("The answer is 42.")).toBeVisible();
+  });
+
+  test("UF-07b assistant text after thinking block shows Claude header", async ({
+    page,
+  }) => {
+    const ctrl = await setupApp(page, { sessions: [] });
+
+    await sendMessage(page, "Deep question");
+    ctrl.sendSseEvents(sse.withThinking("My reasoning…", "The answer is 42.", "sess-2b"));
+
+    // The "Claude" header should be visible on the assistant response
+    // (thinking block should not suppress it via grouping)
+    await expect(page.getByText("Claude").first()).toBeVisible();
     await expect(page.getByText("The answer is 42.")).toBeVisible();
   });
 

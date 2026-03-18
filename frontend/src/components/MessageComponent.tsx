@@ -18,7 +18,11 @@ const MessageComponent = memo(
       prevMessage !== null &&
       prevMessage.type === message.type &&
       message.type !== "tool" &&
-      prevMessage.type !== "tool";
+      prevMessage.type !== "tool" &&
+      !(message.type === "assistant" &&
+        prevMessage.type === "assistant" &&
+        (("isThinking" in message && message.isThinking) ||
+          ("isThinking" in prevMessage && prevMessage.isThinking)));
 
     const formattedTime = new Date(message.timestamp).toLocaleTimeString([], {
       hour: "2-digit",
@@ -29,26 +33,28 @@ const MessageComponent = memo(
     if (message.type === "user") {
       return (
         <div
-          className="flex items-end justify-end gap-1.5 px-4 py-0.5"
+          className="flex justify-end px-4 py-0.5"
           onMouseEnter={() => setHovered(true)}
           onMouseLeave={() => setHovered(false)}
         >
-          <span className="mb-1 flex-shrink-0 text-[10px] text-muted-foreground/50">
-            {formattedTime}
-          </span>
           <div className="max-w-[75%] sm:max-w-lg">
             <div className="rounded-2xl rounded-br-sm bg-primary px-4 py-2.5 text-sm text-primary-foreground shadow-sm">
               <div className="whitespace-pre-wrap break-words leading-relaxed">
                 {message.content}
               </div>
             </div>
+            <div className="mt-0.5 flex items-center justify-end gap-1.5 pr-0.5">
+              {hovered && (
+                <MessageCopyControl
+                  content={message.content}
+                  messageType="user"
+                />
+              )}
+              <span className="text-[10px] text-muted-foreground/50">
+                {formattedTime}
+              </span>
+            </div>
           </div>
-          {hovered && (
-            <MessageCopyControl
-              content={message.content}
-              messageType="user"
-            />
-          )}
         </div>
       );
     }
@@ -165,7 +171,7 @@ function MarkdownContent({ content }: { content: string }) {
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
       rehypePlugins={[rehypeSanitize]}
-      className="prose prose-sm max-w-none dark:prose-invert prose-pre:bg-gray-900 prose-pre:border prose-pre:border-border prose-code:text-sm"
+      className="prose prose-sm max-w-none dark:prose-invert prose-pre:bg-muted prose-pre:border prose-pre:border-border prose-code:text-sm"
     >
       {content}
     </ReactMarkdown>
