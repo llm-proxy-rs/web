@@ -22,7 +22,9 @@ test.describe("settings", () => {
     await expect(page.getByText("API Key")).toBeVisible();
   });
 
-  test("UF-24 clicking the X button closes the settings modal", async ({ page }) => {
+  test("UF-24 clicking the X button closes the settings modal", async ({
+    page,
+  }) => {
     await setupApp(page, {
       settings: { uses_bedrock: false, has_api_key: false, base_url: null },
     });
@@ -36,7 +38,9 @@ test.describe("settings", () => {
     await expect(page.getByText("API Key")).not.toBeVisible();
   });
 
-  test("UF-25 clicking the backdrop closes the settings modal", async ({ page }) => {
+  test("UF-25 clicking the backdrop closes the settings modal", async ({
+    page,
+  }) => {
     await setupApp(page, {
       settings: { uses_bedrock: false, has_api_key: false, base_url: null },
     });
@@ -50,7 +54,9 @@ test.describe("settings", () => {
     await expect(page.getByText("API Key")).not.toBeVisible();
   });
 
-  test("UF-26 shows Set badge when an API key is already configured", async ({ page }) => {
+  test("UF-26 shows Set badge when an API key is already configured", async ({
+    page,
+  }) => {
     await setupApp(page, {
       settings: { uses_bedrock: false, has_api_key: true, base_url: null },
     });
@@ -61,7 +67,9 @@ test.describe("settings", () => {
     await expect(page.getByText("Set", { exact: true })).toBeVisible();
   });
 
-  test("UF-27 hides API key section when uses_bedrock is true", async ({ page }) => {
+  test("UF-27 hides API key section when uses_bedrock is true", async ({
+    page,
+  }) => {
     await setupApp(page, {
       settings: { uses_bedrock: true, has_api_key: false, base_url: null },
     });
@@ -86,7 +94,9 @@ test.describe("settings", () => {
     expect(ctrl.lastSettingsSave()?.api_key).toBe("sk-ant-test-key-123");
   });
 
-  test("UF-29 a server error when saving shows failure message", async ({ page }) => {
+  test("UF-29 a server error when saving shows failure message", async ({
+    page,
+  }) => {
     await setupApp(page, {
       settings: { uses_bedrock: false, has_api_key: false, base_url: null },
       settingsSaveError: true,
@@ -96,12 +106,20 @@ test.describe("settings", () => {
     await page.getByPlaceholder("sk-ant-…").fill("sk-ant-test");
     await page.getByRole("button", { name: "Save" }).click();
 
-    await expect(page.getByText("Failed to save. Please try again.")).toBeVisible();
+    await expect(
+      page.getByText("Failed to save. Please try again."),
+    ).toBeVisible();
   });
 
-  test("UF-30 shows Base URL when configured and not in Bedrock mode", async ({ page }) => {
+  test("UF-30 shows Base URL when configured and not in Bedrock mode", async ({
+    page,
+  }) => {
     await setupApp(page, {
-      settings: { uses_bedrock: false, has_api_key: false, base_url: "https://api.example.com" },
+      settings: {
+        uses_bedrock: false,
+        has_api_key: false,
+        base_url: "https://api.example.com",
+      },
     });
 
     await page.getByTitle("Settings").click();
@@ -110,9 +128,15 @@ test.describe("settings", () => {
     await expect(page.getByText("https://api.example.com")).toBeVisible();
   });
 
-  test("UF-31 hides Base URL in Bedrock mode even when base_url is set", async ({ page }) => {
+  test("UF-31 hides Base URL in Bedrock mode even when base_url is set", async ({
+    page,
+  }) => {
     await setupApp(page, {
-      settings: { uses_bedrock: true, has_api_key: false, base_url: "http://54.167.41.65:3000" },
+      settings: {
+        uses_bedrock: true,
+        has_api_key: false,
+        base_url: "http://54.167.41.65:3000",
+      },
     });
 
     await page.getByTitle("Settings").click();
@@ -120,5 +144,4 @@ test.describe("settings", () => {
     await expect(page.getByText("API Key")).not.toBeVisible();
     await expect(page.getByText("Base URL:")).not.toBeVisible();
   });
-
 });

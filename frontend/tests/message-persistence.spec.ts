@@ -74,7 +74,12 @@ test.describe("message-persistence", () => {
     await page.addInitScript(
       (args: {
         convId: string;
-        messages: { id: string; type: string; content: string; timestamp: number }[];
+        messages: {
+          id: string;
+          type: string;
+          content: string;
+          timestamp: number;
+        }[];
       }) => {
         localStorage.setItem(
           `chat_messages_${args.convId}`,
@@ -117,7 +122,12 @@ test.describe("message-persistence", () => {
     await page.addInitScript(
       (args: {
         convId: string;
-        messages: { id: string; type: string; content: string; timestamp: number }[];
+        messages: {
+          id: string;
+          type: string;
+          content: string;
+          timestamp: number;
+        }[];
       }) => {
         localStorage.setItem(
           `chat_messages_${args.convId}`,

@@ -8,12 +8,16 @@ import { test, expect } from "@playwright/test";
 import { setupApp, makeConversation } from "./helpers/setup";
 
 test.describe("mobile responsive", () => {
-  test("MR-01 on narrow viewport, sidebar is hidden by default", async ({ page }) => {
+  test("MR-01 on narrow viewport, sidebar is hidden by default", async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 375, height: 667 });
     await setupApp(page, {});
 
     // Sidebar header should not be visible
-    await expect(page.getByText("Conversations", { exact: true })).not.toBeVisible();
+    await expect(
+      page.getByText("Conversations", { exact: true }),
+    ).not.toBeVisible();
   });
 
   test("MR-02 bottom navigation bar visible on mobile", async ({ page }) => {
@@ -27,7 +31,9 @@ test.describe("mobile responsive", () => {
     await expect(mobileNav.getByText("Terminal")).toBeVisible();
   });
 
-  test("MR-03 tapping Chat/Terminal in bottom nav switches views", async ({ page }) => {
+  test("MR-03 tapping Chat/Terminal in bottom nav switches views", async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 375, height: 667 });
     await setupApp(page, {});
 
@@ -46,34 +52,46 @@ test.describe("mobile responsive", () => {
     await expect(page.getByText("Welcome back")).toBeVisible();
   });
 
-  test("MR-04 on wide viewport, sidebar visible and bottom nav hidden", async ({ page }) => {
+  test("MR-04 on wide viewport, sidebar visible and bottom nav hidden", async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await setupApp(page, {});
 
     // Sidebar visible
-    await expect(page.getByText("Conversations", { exact: true })).toBeVisible();
+    await expect(
+      page.getByText("Conversations", { exact: true }),
+    ).toBeVisible();
     // Bottom nav not visible
     await expect(page.locator("[data-testid='mobile-nav']")).not.toBeVisible();
   });
 
-  test("MR-05 tapping History opens sidebar overlay showing conversations", async ({ page }) => {
+  test("MR-05 tapping History opens sidebar overlay showing conversations", async ({
+    page,
+  }) => {
     const conv = makeConversation({ title: "Test conversation" });
     await page.setViewportSize({ width: 375, height: 667 });
     await setupApp(page, { conversations: [conv] });
 
     // Sidebar should be hidden initially
-    await expect(page.getByText("Conversations", { exact: true })).not.toBeVisible();
+    await expect(
+      page.getByText("Conversations", { exact: true }),
+    ).not.toBeVisible();
 
     // Tap History button
     const mobileNav = page.locator("[data-testid='mobile-nav']");
     await mobileNav.getByText("History").click();
 
     // Sidebar overlay should now be visible with the conversation
-    await expect(page.getByText("Conversations", { exact: true })).toBeVisible();
+    await expect(
+      page.getByText("Conversations", { exact: true }),
+    ).toBeVisible();
     await expect(page.getByText("Test conversation")).toBeVisible();
   });
 
-  test("MR-06 selecting a conversation in mobile sidebar closes it", async ({ page }) => {
+  test("MR-06 selecting a conversation in mobile sidebar closes it", async ({
+    page,
+  }) => {
     const conv = makeConversation({ title: "Pick me" });
     await page.setViewportSize({ width: 375, height: 667 });
     await setupApp(page, { conversations: [conv] });
@@ -87,6 +105,8 @@ test.describe("mobile responsive", () => {
     await page.getByText("Pick me").click();
 
     // Sidebar should close
-    await expect(page.getByText("Conversations", { exact: true })).not.toBeVisible();
+    await expect(
+      page.getByText("Conversations", { exact: true }),
+    ).not.toBeVisible();
   });
 });

@@ -12,7 +12,9 @@ import { test, expect } from "@playwright/test";
 import { setupApp, sendMessage, sse, makeConversation } from "./helpers/setup";
 
 test.describe("composer", () => {
-  test("UF-30 Shift+Enter inserts a newline without submitting", async ({ page }) => {
+  test("UF-30 Shift+Enter inserts a newline without submitting", async ({
+    page,
+  }) => {
     await setupApp(page, {});
 
     const composer = page.getByPlaceholder("Message Claude…");
@@ -29,22 +31,31 @@ test.describe("composer", () => {
     expect(value).toBe("line1\nline2");
   });
 
-  test("UF-31 SSE error event shows an error message in the chat", async ({ page }) => {
+  test("UF-31 SSE error event shows an error message in the chat", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, {});
 
     await sendMessage(page, "Do something");
     ctrl.sendSseEvents([
       { event: "init" },
-      { event: "error_event", data: { message: "Something went wrong on the server" } },
+      {
+        event: "error_event",
+        data: { message: "Something went wrong on the server" },
+      },
     ]);
 
     // Error text appears in the chat
-    await expect(page.getByText("Something went wrong on the server")).toBeVisible();
+    await expect(
+      page.getByText("Something went wrong on the server"),
+    ).toBeVisible();
     // Streaming state is cleared — status bar gone
     await expect(page.getByRole("status")).not.toBeVisible();
   });
 
-  test("UF-32 hovering an assistant message reveals the copy button", async ({ page }) => {
+  test("UF-32 hovering an assistant message reveals the copy button", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, {});
 
     await sendMessage(page, "Hello");
@@ -60,11 +71,15 @@ test.describe("composer", () => {
     await expect(page.getByTitle("Copy", { exact: true })).toBeVisible();
   });
 
-  test("UF-33 code block shows language header and copy button", async ({ page }) => {
+  test("UF-33 code block shows language header and copy button", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, {});
 
     await sendMessage(page, "Show me code");
-    ctrl.sendSseEvents(sse.text("Here is code:\n\n```python\nprint('hello')\n```", "sess-code"));
+    ctrl.sendSseEvents(
+      sse.text("Here is code:\n\n```python\nprint('hello')\n```", "sess-code"),
+    );
 
     // Code content visible
     await expect(page.getByText("print('hello')")).toBeVisible();
@@ -74,7 +89,9 @@ test.describe("composer", () => {
     await expect(page.getByTitle("Copy code")).toBeVisible();
   });
 
-  test("UF-56 clicking New Chat focuses the composer textarea", async ({ page }) => {
+  test("UF-56 clicking New Chat focuses the composer textarea", async ({
+    page,
+  }) => {
     await setupApp(page, {
       conversations: [makeConversation({ title: "Old chat" })],
     });
@@ -90,7 +107,9 @@ test.describe("composer", () => {
     await expect(composer).toBeFocused();
   });
 
-  test("UF-57 composer textarea regains focus after sending a message", async ({ page }) => {
+  test("UF-57 composer textarea regains focus after sending a message", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, {});
 
     await sendMessage(page, "Hello");
@@ -103,7 +122,9 @@ test.describe("composer", () => {
     await expect(composer).toBeFocused();
   });
 
-  test("UF-58 switching to a history session focuses the composer textarea", async ({ page }) => {
+  test("UF-58 switching to a history session focuses the composer textarea", async ({
+    page,
+  }) => {
     await setupApp(page, {
       conversations: [makeConversation({ title: "Past chat" })],
     });
@@ -114,7 +135,9 @@ test.describe("composer", () => {
     await expect(composer).toBeFocused();
   });
 
-  test("UF-61 clicking New Chat when already on blank state focuses the composer textarea", async ({ page }) => {
+  test("UF-61 clicking New Chat when already on blank state focuses the composer textarea", async ({
+    page,
+  }) => {
     // Load with no conversations — selectedConversation starts as null
     await setupApp(page, {});
 
@@ -140,7 +163,9 @@ test.describe("composer", () => {
     await expect(page.locator('button[title="Attach image"]')).toHaveCount(0);
   });
 
-  test("UF-63 attach button accepts all file types including images", async ({ page }) => {
+  test("UF-63 attach button accepts all file types including images", async ({
+    page,
+  }) => {
     await setupApp(page, {});
 
     // The hidden file input should NOT have an accept filter — it takes all files

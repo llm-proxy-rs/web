@@ -72,10 +72,14 @@ test.describe("tool renderers", () => {
 
     await expect(page.getByText("WebSearch")).toBeVisible();
     // Summary shows the query
-    await expect(page.getByText("playwright testing best practices")).toBeVisible();
+    await expect(
+      page.getByText("playwright testing best practices"),
+    ).toBeVisible();
   });
 
-  test("tool result Show more/Show less toggle works for long results", async ({ page }) => {
+  test("tool result Show more/Show less toggle works for long results", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, { sessions: [] });
 
     // Create a long result (>200 chars to trigger the toggle)

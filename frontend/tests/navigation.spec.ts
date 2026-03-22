@@ -15,7 +15,13 @@
  * UF-46  Composer re-enables after done         — input active again once running session completes
  */
 import { test, expect } from "@playwright/test";
-import { setupApp, sendMessage, sse, makeSession, makeConversation } from "./helpers/setup";
+import {
+  setupApp,
+  sendMessage,
+  sse,
+  makeSession,
+  makeConversation,
+} from "./helpers/setup";
 
 test.describe("navigation during streaming", () => {
   // ── Null-session streaming ─────────────────────────────────────────────────
@@ -34,11 +40,15 @@ test.describe("navigation during streaming", () => {
     await expect(page.getByRole("status")).not.toBeVisible();
 
     // Clean up so the stream doesn't leak into the next test
-    ctrl.sendSseEvents([{ event: "done", data: { session_id: null, task_id: "t" } }]);
+    ctrl.sendSseEvents([
+      { event: "done", data: { session_id: null, task_id: "t" } },
+    ]);
     await expect(page.getByRole("status")).not.toBeVisible();
   });
 
-  test("UF-35 status bar stays hidden when done fires after a stale New Chat click", async ({ page }) => {
+  test("UF-35 status bar stays hidden when done fires after a stale New Chat click", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, {});
 
     await sendMessage(page, "Hello");
@@ -52,14 +62,18 @@ test.describe("navigation during streaming", () => {
     await expect(page.getByText("Welcome back")).toBeVisible();
   });
 
-  test("UF-35b error fires after a stale New Chat click — no error shown in blank view", async ({ page }) => {
+  test("UF-35b error fires after a stale New Chat click — no error shown in blank view", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, {});
 
     await sendMessage(page, "Hello");
     await page.getByRole("button", { name: "New Chat" }).click();
     await expect(page.getByRole("status")).not.toBeVisible();
 
-    ctrl.sendSseEvents([{ event: "error_event", data: { message: "something went wrong" } }]);
+    ctrl.sendSseEvents([
+      { event: "error_event", data: { message: "something went wrong" } },
+    ]);
 
     // error_event fires for an orphaned stream — error is silently discarded from blank view
     await expect(page.getByText("something went wrong")).not.toBeVisible();
@@ -75,7 +89,9 @@ test.describe("navigation during streaming", () => {
     await page.getByRole("button", { name: "New Chat" }).click();
 
     // Pre-populate history so the refresh triggered by done returns the new session
-    ctrl.setSessions([makeSession({ session_id: "sess-new", title: "My stale session" })]);
+    ctrl.setSessions([
+      makeSession({ session_id: "sess-new", title: "My stale session" }),
+    ]);
     ctrl.sendSseEvents(sse.text("The response", "sess-new"));
 
     // New session surfaces in the sidebar from the history refresh
@@ -119,7 +135,9 @@ test.describe("navigation during streaming", () => {
     await expect(page.locator(".animate-ping")).toBeVisible();
   });
 
-  test("UF-39 navigating back to the running session restores the status bar", async ({ page }) => {
+  test("UF-39 navigating back to the running session restores the status bar", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, {
       conversations: [makeConversation({ title: "Running Session" })],
     });
@@ -137,9 +155,14 @@ test.describe("navigation during streaming", () => {
   test("UF-40 done fires while viewing new chat — sidebar indicator clears, view unchanged", async ({
     page,
   }) => {
-    const session = makeSession({ session_id: "sess-a", title: "Running Session" });
+    const session = makeSession({
+      session_id: "sess-a",
+      title: "Running Session",
+    });
     const ctrl = await setupApp(page, {
-      conversations: [makeConversation({ sessionId: "sess-a", title: "Running Session" })],
+      conversations: [
+        makeConversation({ sessionId: "sess-a", title: "Running Session" }),
+      ],
     });
 
     await page.getByText("Running Session").click();

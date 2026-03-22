@@ -6,7 +6,9 @@ import { test, expect } from "@playwright/test";
 import { setupApp } from "./helpers/setup";
 
 test.describe("drag-drop", () => {
-  test("dropping a file attaches it and shows in composer", async ({ page }) => {
+  test("dropping a file attaches it and shows in composer", async ({
+    page,
+  }) => {
     await setupApp(page, {});
 
     // Use the file input to simulate an attachment (drop uses the same addFiles path)

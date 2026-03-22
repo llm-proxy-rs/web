@@ -45,7 +45,9 @@ test.describe("markdown rendering", () => {
     await expect(page.getByText("python", { exact: false })).toBeVisible();
   });
 
-  test("MR-03 code block copy button is present and clickable", async ({ page }) => {
+  test("MR-03 code block copy button is present and clickable", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, {});
     const code = "```bash\necho hello\n```";
 
@@ -65,13 +67,20 @@ test.describe("markdown rendering", () => {
     await expect(copyBtn.locator("svg")).toBeVisible();
   });
 
-  test("MR-04 inline code has distinct background and border", async ({ page }) => {
+  test("MR-04 inline code has distinct background and border", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, {});
 
     await sendMessage(page, "show inline");
-    ctrl.sendSseEvents(sse.text("Use the `useState` hook to manage state.", "sess-mr4"));
+    ctrl.sendSseEvents(
+      sse.text("Use the `useState` hook to manage state.", "sess-mr4"),
+    );
 
-    const inlineCode = page.locator("code").filter({ hasText: "useState" }).first();
+    const inlineCode = page
+      .locator("code")
+      .filter({ hasText: "useState" })
+      .first();
     await expect(inlineCode).toBeVisible();
 
     // Inline code should have background color set (not transparent)
@@ -82,13 +91,18 @@ test.describe("markdown rendering", () => {
     expect(bg).not.toBe("transparent");
   });
 
-  test("MR-05 inline code does not display backtick characters", async ({ page }) => {
+  test("MR-05 inline code does not display backtick characters", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, {});
 
     await sendMessage(page, "show inline");
     ctrl.sendSseEvents(sse.text("Run `npm install` to install.", "sess-mr5"));
 
-    const inlineCode = page.locator("code").filter({ hasText: "npm install" }).first();
+    const inlineCode = page
+      .locator("code")
+      .filter({ hasText: "npm install" })
+      .first();
     await expect(inlineCode).toBeVisible();
 
     // The prose ::before/::after should not add visible backtick content.
@@ -104,11 +118,15 @@ test.describe("markdown rendering", () => {
     expect(afterContent).not.toBe('"`"');
   });
 
-  test("MR-06 links render as clickable anchors opening in new tab", async ({ page }) => {
+  test("MR-06 links render as clickable anchors opening in new tab", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, {});
 
     await sendMessage(page, "give link");
-    ctrl.sendSseEvents(sse.text("Visit [Example](https://example.com) for more.", "sess-mr6"));
+    ctrl.sendSseEvents(
+      sse.text("Visit [Example](https://example.com) for more.", "sess-mr6"),
+    );
 
     const link = page.locator("a").filter({ hasText: "Example" }).first();
     await expect(link).toBeVisible();
@@ -116,7 +134,9 @@ test.describe("markdown rendering", () => {
     await expect(link).toHaveAttribute("target", "_blank");
   });
 
-  test("MR-07 tables render with header styling and row separation", async ({ page }) => {
+  test("MR-07 tables render with header styling and row separation", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, {});
     const table =
       "| Name | Age | Role |\n| --- | --- | --- |\n| Alice | 30 | Engineer |\n| Bob | 25 | Designer |\n| Carol | 28 | Manager |";
@@ -129,9 +149,21 @@ test.describe("markdown rendering", () => {
 
     // ── Structure: all headers and cells rendered ──
     for (const header of ["Name", "Age", "Role"]) {
-      await expect(page.locator("th").filter({ hasText: header })).toBeVisible();
+      await expect(
+        page.locator("th").filter({ hasText: header }),
+      ).toBeVisible();
     }
-    for (const cell of ["Alice", "30", "Engineer", "Bob", "25", "Designer", "Carol", "28", "Manager"]) {
+    for (const cell of [
+      "Alice",
+      "30",
+      "Engineer",
+      "Bob",
+      "25",
+      "Designer",
+      "Carol",
+      "28",
+      "Manager",
+    ]) {
       await expect(page.locator("td").filter({ hasText: cell })).toBeVisible();
     }
 
@@ -139,7 +171,11 @@ test.describe("markdown rendering", () => {
     const tableWrapper = tableEl.locator("..");
     const wrapperStyle = await tableWrapper.evaluate((el) => {
       const s = getComputedStyle(el);
-      return { border: s.borderTopWidth, radius: s.borderRadius, overflow: s.overflowX };
+      return {
+        border: s.borderTopWidth,
+        radius: s.borderRadius,
+        overflow: s.overflowX,
+      };
     });
     expect(wrapperStyle.border).not.toBe("0px");
     expect(parseFloat(wrapperStyle.radius)).toBeGreaterThan(0);
@@ -171,40 +207,47 @@ test.describe("markdown rendering", () => {
     const rowCount = await dataRows.count();
     expect(rowCount).toBe(3);
     for (let i = 0; i < rowCount; i++) {
-      const borderBottom = await dataRows.nth(i).evaluate(
-        (el) => getComputedStyle(el).borderBottomWidth,
-      );
+      const borderBottom = await dataRows
+        .nth(i)
+        .evaluate((el) => getComputedStyle(el).borderBottomWidth);
       expect(borderBottom).not.toBe("0px");
     }
 
     // ── Rows: alternating background colors (even rows differ from odd) ──
-    const firstRowBg = await dataRows.nth(0).evaluate(
-      (el) => getComputedStyle(el).backgroundColor,
-    );
-    const secondRowBg = await dataRows.nth(1).evaluate(
-      (el) => getComputedStyle(el).backgroundColor,
-    );
+    const firstRowBg = await dataRows
+      .nth(0)
+      .evaluate((el) => getComputedStyle(el).backgroundColor);
+    const secondRowBg = await dataRows
+      .nth(1)
+      .evaluate((el) => getComputedStyle(el).backgroundColor);
     expect(firstRowBg).not.toBe(secondRowBg);
 
     // ── Cells: proper padding ──
-    const thPadding = await page.locator("th").first().evaluate((el) => {
-      const s = getComputedStyle(el);
-      return { left: s.paddingLeft, top: s.paddingTop };
-    });
+    const thPadding = await page
+      .locator("th")
+      .first()
+      .evaluate((el) => {
+        const s = getComputedStyle(el);
+        return { left: s.paddingLeft, top: s.paddingTop };
+      });
     expect(parseFloat(thPadding.left)).toBeGreaterThan(0);
     expect(parseFloat(thPadding.top)).toBeGreaterThan(0);
 
-    const tdPadding = await page.locator("td").first().evaluate((el) => {
-      const s = getComputedStyle(el);
-      return { left: s.paddingLeft, top: s.paddingTop };
-    });
+    const tdPadding = await page
+      .locator("td")
+      .first()
+      .evaluate((el) => {
+        const s = getComputedStyle(el);
+        return { left: s.paddingLeft, top: s.paddingTop };
+      });
     expect(parseFloat(tdPadding.left)).toBeGreaterThan(0);
     expect(parseFloat(tdPadding.top)).toBeGreaterThan(0);
 
     // ── Header text: font-weight is semibold/bold ──
-    const thFontWeight = await page.locator("th").first().evaluate(
-      (el) => getComputedStyle(el).fontWeight,
-    );
+    const thFontWeight = await page
+      .locator("th")
+      .first()
+      .evaluate((el) => getComputedStyle(el).fontWeight);
     expect(parseInt(thFontWeight)).toBeGreaterThanOrEqual(600);
 
     // ── Text contrast: table content is readable (WCAG AA) ──
@@ -267,11 +310,15 @@ test.describe("markdown rendering", () => {
     await expect(page.getByText("First")).toBeVisible();
   });
 
-  test("MR-10 assistant text has readable contrast against background", async ({ page }) => {
+  test("MR-10 assistant text has readable contrast against background", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, {});
 
     await sendMessage(page, "Hi");
-    ctrl.sendSseEvents(sse.text("Hello there! This is a response.", "sess-mr10"));
+    ctrl.sendSseEvents(
+      sse.text("Hello there! This is a response.", "sess-mr10"),
+    );
 
     const msgEl = page.getByText("Hello there! This is a response.").first();
     await expect(msgEl).toBeVisible();

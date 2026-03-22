@@ -22,7 +22,9 @@ test.describe("files", () => {
     await expect(page.getByText("Empty directory")).toBeVisible();
   });
 
-  test("UF-19 file listing shows names and formatted sizes", async ({ page }) => {
+  test("UF-19 file listing shows names and formatted sizes", async ({
+    page,
+  }) => {
     await setupApp(page, {
       files: {
         "/tmp": [
@@ -62,7 +64,9 @@ test.describe("files", () => {
     await expect(page.getByText("..")).toBeVisible();
   });
 
-  test("UF-21 clicking Home in breadcrumb navigates back to root", async ({ page }) => {
+  test("UF-21 clicking Home in breadcrumb navigates back to root", async ({
+    page,
+  }) => {
     await setupApp(page, {
       files: {
         "/tmp": [{ name: "logs", is_dir: true, size: 0 }],
@@ -83,7 +87,9 @@ test.describe("files", () => {
     await expect(page.getByText("app.log")).not.toBeVisible();
   });
 
-  test("UF-22 uploading a file shows status and then clears", async ({ page }) => {
+  test("UF-22 uploading a file shows status and then clears", async ({
+    page,
+  }) => {
     await setupApp(page, { files: { "/tmp": [] } });
 
     await openFiles(page);
@@ -91,11 +97,14 @@ test.describe("files", () => {
     await expect(page.getByText("Empty directory")).toBeVisible();
 
     // Set files directly on the hidden input — avoids relying on the OS file chooser dialog
-    await page.locator('input[type="file"]').last().setInputFiles({
-      name: "test.txt",
-      mimeType: "text/plain",
-      buffer: Buffer.from("hello"),
-    });
+    await page
+      .locator('input[type="file"]')
+      .last()
+      .setInputFiles({
+        name: "test.txt",
+        mimeType: "text/plain",
+        buffer: Buffer.from("hello"),
+      });
 
     // "Uploading…" banner appears immediately
     await expect(page.getByText("Uploading…")).toBeVisible();

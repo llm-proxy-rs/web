@@ -13,7 +13,9 @@ import { test, expect } from "@playwright/test";
 import { setupApp, sendMessage, sse } from "./helpers/setup";
 
 test.describe("assistant message card", () => {
-  test("AC-01 assistant text message is wrapped in a card container", async ({ page }) => {
+  test("AC-01 assistant text message is wrapped in a card container", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, {});
 
     await sendMessage(page, "Hello");
@@ -29,7 +31,9 @@ test.describe("assistant message card", () => {
     await expect(card.getByText("Hi there!")).toBeVisible();
   });
 
-  test("AC-02 card has background color distinct from page background", async ({ page }) => {
+  test("AC-02 card has background color distinct from page background", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, {});
 
     await sendMessage(page, "Hello");
@@ -38,15 +42,17 @@ test.describe("assistant message card", () => {
     const card = page.locator('[data-testid="assistant-card"]').first();
     await expect(card).toBeVisible();
 
-    const cardBg = await card.evaluate((el) => getComputedStyle(el).backgroundColor);
+    const cardBg = await card.evaluate(
+      (el) => getComputedStyle(el).backgroundColor,
+    );
     // Should not be transparent
     expect(cardBg).not.toBe("rgba(0, 0, 0, 0)");
     expect(cardBg).not.toBe("transparent");
 
     // Should differ from the page background
-    const pageBg = await page.locator("body").evaluate(
-      (el) => getComputedStyle(el).backgroundColor,
-    );
+    const pageBg = await page
+      .locator("body")
+      .evaluate((el) => getComputedStyle(el).backgroundColor);
     expect(cardBg).not.toBe(pageBg);
   });
 
@@ -59,16 +65,27 @@ test.describe("assistant message card", () => {
     const card = page.locator('[data-testid="assistant-card"]').first();
     await expect(card).toBeVisible();
 
-    const radius = await card.evaluate((el) => getComputedStyle(el).borderRadius);
+    const radius = await card.evaluate(
+      (el) => getComputedStyle(el).borderRadius,
+    );
     expect(parseFloat(radius)).toBeGreaterThan(0);
   });
 
-  test("AC-04 tool messages within the same turn are inside the same card", async ({ page }) => {
+  test("AC-04 tool messages within the same turn are inside the same card", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, {});
 
     await sendMessage(page, "Run ls");
     ctrl.sendSseEvents(
-      sse.withTool("t1", "Bash", { command: "ls" }, "file.txt", "Here are the files.", "sess-ac4"),
+      sse.withTool(
+        "t1",
+        "Bash",
+        { command: "ls" },
+        "file.txt",
+        "Here are the files.",
+        "sess-ac4",
+      ),
     );
 
     await expect(page.getByText("Here are the files.")).toBeVisible();
@@ -82,10 +99,14 @@ test.describe("assistant message card", () => {
     const card = cards.first();
     await expect(card.getByText("Here are the files.")).toBeVisible();
     // Tool renderer should be inside the card too
-    await expect(card.locator('[data-testid="tool-renderer"]').or(card.getByText("Bash"))).toBeVisible();
+    await expect(
+      card.locator('[data-testid="tool-renderer"]').or(card.getByText("Bash")),
+    ).toBeVisible();
   });
 
-  test("AC-05 multiple text chunks in one turn share the same card", async ({ page }) => {
+  test("AC-05 multiple text chunks in one turn share the same card", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, {});
 
     await sendMessage(page, "Explain something");
@@ -103,7 +124,9 @@ test.describe("assistant message card", () => {
     expect(await cards.count()).toBe(1);
   });
 
-  test("AC-06 user message after assistant card starts a new visual group", async ({ page }) => {
+  test("AC-06 user message after assistant card starts a new visual group", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, {});
 
     // First exchange
@@ -127,7 +150,9 @@ test.describe("assistant message card", () => {
     await expect(cards.nth(1).getByText("I'm doing well!")).toBeVisible();
   });
 
-  test("AC-07 card text has readable contrast against card background", async ({ page }) => {
+  test("AC-07 card text has readable contrast against card background", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, {});
 
     await sendMessage(page, "Hello");

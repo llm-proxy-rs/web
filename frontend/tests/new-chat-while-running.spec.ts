@@ -7,7 +7,9 @@ import { test, expect } from "@playwright/test";
 import { setupApp, sendMessage, sse, makeConversation } from "./helpers/setup";
 
 test.describe("new chat while a task is running", () => {
-  test("UF-70 clicking New Chat while streaming enables the composer", async ({ page }) => {
+  test("UF-70 clicking New Chat while streaming enables the composer", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, {});
 
     // Send a message — this starts streaming (POST /chat blocks waiting for SSE events)
@@ -27,7 +29,9 @@ test.describe("new chat while a task is running", () => {
     await expect(sendBtn).toBeEnabled();
   });
 
-  test("UF-71 can send a message in new chat while another is streaming", async ({ page }) => {
+  test("UF-71 can send a message in new chat while another is streaming", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, {});
 
     // Start a streaming task
@@ -48,7 +52,9 @@ test.describe("new chat while a task is running", () => {
     expect(bodies[1].content).toBe("Hello new chat");
   });
 
-  test("UF-72 concurrent tasks route SSE events to correct conversations", async ({ page }) => {
+  test("UF-72 concurrent tasks route SSE events to correct conversations", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, {});
 
     // Queue events for the first POST — these will be delivered with conversation 1's ID

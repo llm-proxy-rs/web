@@ -29,7 +29,9 @@ test.describe("image attachment", () => {
     await expect(page.getByText("photo.png")).toBeVisible();
   });
 
-  test("IA-03 removing an image chip removes it from pending list", async ({ page }) => {
+  test("IA-03 removing an image chip removes it from pending list", async ({
+    page,
+  }) => {
     await setupApp(page, {});
 
     const fileInput = page.locator('input[type="file"]').first();

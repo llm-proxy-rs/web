@@ -34,7 +34,10 @@ test.describe("question panel", () => {
 
     // Submit with the keyboard-selected option
     const [answerReq] = await Promise.all([
-      page.waitForRequest((r) => r.url().includes("chat-question-answer") && r.method() === "POST"),
+      page.waitForRequest(
+        (r) =>
+          r.url().includes("chat-question-answer") && r.method() === "POST",
+      ),
       page.getByRole("button", { name: "Submit" }).click(),
     ]);
 
@@ -52,10 +55,7 @@ test.describe("question panel", () => {
       sse.question("req-other-1", [
         {
           question: "Favorite language?",
-          options: [
-            { label: "Python" },
-            { label: "TypeScript" },
-          ],
+          options: [{ label: "Python" }, { label: "TypeScript" }],
         },
       ]),
     );
@@ -72,7 +72,10 @@ test.describe("question panel", () => {
 
     // Submit
     const [answerReq] = await Promise.all([
-      page.waitForRequest((r) => r.url().includes("chat-question-answer") && r.method() === "POST"),
+      page.waitForRequest(
+        (r) =>
+          r.url().includes("chat-question-answer") && r.method() === "POST",
+      ),
       page.getByRole("button", { name: "Submit" }).click(),
     ]);
 
@@ -82,7 +85,9 @@ test.describe("question panel", () => {
     expect(body.answers["Favorite language?"]).toBe("Rust");
   });
 
-  test("multi-step wizard shows Next/Back and step indicators", async ({ page }) => {
+  test("multi-step wizard shows Next/Back and step indicators", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, { sessions: [] });
 
     await sendMessage(page, "Wizard");
@@ -145,7 +150,10 @@ test.describe("question panel", () => {
 
     // Click Skip — should send empty answers
     const [answerReq] = await Promise.all([
-      page.waitForRequest((r) => r.url().includes("chat-question-answer") && r.method() === "POST"),
+      page.waitForRequest(
+        (r) =>
+          r.url().includes("chat-question-answer") && r.method() === "POST",
+      ),
       page.getByText("Skip").click(),
     ]);
 
@@ -173,7 +181,10 @@ test.describe("question panel", () => {
 
     // Press Escape to dismiss
     const [answerReq] = await Promise.all([
-      page.waitForRequest((r) => r.url().includes("chat-question-answer") && r.method() === "POST"),
+      page.waitForRequest(
+        (r) =>
+          r.url().includes("chat-question-answer") && r.method() === "POST",
+      ),
       page.keyboard.press("Escape"),
     ]);
 

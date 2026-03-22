@@ -42,7 +42,9 @@ test.describe("model chip", () => {
 
     // Select Haiku — intercept the PUT request
     const [putReq] = await Promise.all([
-      page.waitForRequest((r) => r.url().includes("/api/settings") && r.method() === "PUT"),
+      page.waitForRequest(
+        (r) => r.url().includes("/api/settings") && r.method() === "PUT",
+      ),
       page.getByText("Haiku").click(),
     ]);
 

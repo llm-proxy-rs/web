@@ -11,7 +11,9 @@ import { test, expect } from "@playwright/test";
 import { setupApp, sendMessage, sse } from "./helpers/setup";
 
 test.describe("assistant copy button", () => {
-  test("CP-01 hovering the assistant card reveals a visible copy button", async ({ page }) => {
+  test("CP-01 hovering the assistant card reveals a visible copy button", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, {});
 
     await sendMessage(page, "Hello");
@@ -49,12 +51,18 @@ test.describe("assistant copy button", () => {
 
     // Button should be within the card's horizontal and vertical bounds
     expect(btnBox!.x).toBeGreaterThanOrEqual(cardBox!.x);
-    expect(btnBox!.x + btnBox!.width).toBeLessThanOrEqual(cardBox!.x + cardBox!.width);
+    expect(btnBox!.x + btnBox!.width).toBeLessThanOrEqual(
+      cardBox!.x + cardBox!.width,
+    );
     expect(btnBox!.y).toBeGreaterThanOrEqual(cardBox!.y);
-    expect(btnBox!.y + btnBox!.height).toBeLessThanOrEqual(cardBox!.y + cardBox!.height);
+    expect(btnBox!.y + btnBox!.height).toBeLessThanOrEqual(
+      cardBox!.y + cardBox!.height,
+    );
   });
 
-  test("CP-03 copy button copies the assistant text content", async ({ page }) => {
+  test("CP-03 copy button copies the assistant text content", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, {});
 
     await sendMessage(page, "Hello");
@@ -68,15 +76,21 @@ test.describe("assistant copy button", () => {
     await expect(copyBtn).toBeVisible();
 
     // Grant clipboard permission and click
-    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page
+      .context()
+      .grantPermissions(["clipboard-read", "clipboard-write"]);
     await copyBtn.click();
 
     // Read clipboard
-    const clipboardText = await page.evaluate(() => navigator.clipboard.readText());
+    const clipboardText = await page.evaluate(() =>
+      navigator.clipboard.readText(),
+    );
     expect(clipboardText).toContain("Copyable response text.");
   });
 
-  test("CP-04 copy button shows Copied title after clicking", async ({ page }) => {
+  test("CP-04 copy button shows Copied title after clicking", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, {});
 
     await sendMessage(page, "Hello");
@@ -85,7 +99,9 @@ test.describe("assistant copy button", () => {
     const card = page.locator('[data-testid="assistant-card"]').first();
     await card.hover();
 
-    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page
+      .context()
+      .grantPermissions(["clipboard-read", "clipboard-write"]);
 
     const copyBtn = page.getByTitle("Copy", { exact: true });
     await copyBtn.click();
@@ -94,14 +110,19 @@ test.describe("assistant copy button", () => {
     await expect(page.getByTitle("Copied!")).toBeVisible();
   });
 
-  test("CP-05 user message copy button is still visible on hover", async ({ page }) => {
+  test("CP-05 user message copy button is still visible on hover", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, {});
 
     await sendMessage(page, "My user message");
     ctrl.sendSseEvents(sse.text("Reply.", "sess-cp5"));
 
     // Hover the user message bubble (the primary-colored bubble, not the sidebar)
-    const userBubble = page.locator(".bg-primary").filter({ hasText: "My user message" }).first();
+    const userBubble = page
+      .locator(".bg-primary")
+      .filter({ hasText: "My user message" })
+      .first();
     await userBubble.hover();
 
     // User message copy button should appear

@@ -8,7 +8,9 @@ import { test, expect } from "@playwright/test";
 import { setupApp, makeConversation } from "./helpers/setup";
 
 test.describe("sidebar search", () => {
-  test("SS-01 search input filters conversations by title", async ({ page }) => {
+  test("SS-01 search input filters conversations by title", async ({
+    page,
+  }) => {
     await setupApp(page, {
       conversations: [
         makeConversation({ title: "React hooks guide" }),
@@ -20,9 +22,15 @@ test.describe("sidebar search", () => {
     const searchInput = page.getByPlaceholder("Search conversations…");
     await searchInput.fill("React");
 
-    await expect(page.locator("span.truncate").filter({ hasText: "React hooks guide" })).toBeVisible();
-    await expect(page.locator("span.truncate").filter({ hasText: "React components" })).toBeVisible();
-    await expect(page.locator("span.truncate").filter({ hasText: "Python basics" })).not.toBeVisible();
+    await expect(
+      page.locator("span.truncate").filter({ hasText: "React hooks guide" }),
+    ).toBeVisible();
+    await expect(
+      page.locator("span.truncate").filter({ hasText: "React components" }),
+    ).toBeVisible();
+    await expect(
+      page.locator("span.truncate").filter({ hasText: "Python basics" }),
+    ).not.toBeVisible();
   });
 
   test("SS-02 clearing search restores full list", async ({ page }) => {
@@ -37,20 +45,24 @@ test.describe("sidebar search", () => {
     await searchInput.fill("React");
 
     // Only React visible
-    await expect(page.locator("span.truncate").filter({ hasText: "Python basics" })).not.toBeVisible();
+    await expect(
+      page.locator("span.truncate").filter({ hasText: "Python basics" }),
+    ).not.toBeVisible();
 
     // Clear search
     await searchInput.fill("");
 
-    await expect(page.locator("span.truncate").filter({ hasText: "React hooks guide" })).toBeVisible();
-    await expect(page.locator("span.truncate").filter({ hasText: "Python basics" })).toBeVisible();
+    await expect(
+      page.locator("span.truncate").filter({ hasText: "React hooks guide" }),
+    ).toBeVisible();
+    await expect(
+      page.locator("span.truncate").filter({ hasText: "Python basics" }),
+    ).toBeVisible();
   });
 
   test("SS-03 search with no matches shows empty state", async ({ page }) => {
     await setupApp(page, {
-      conversations: [
-        makeConversation({ title: "React hooks guide" }),
-      ],
+      conversations: [makeConversation({ title: "React hooks guide" })],
     });
 
     const searchInput = page.getByPlaceholder("Search conversations…");
@@ -61,14 +73,14 @@ test.describe("sidebar search", () => {
 
   test("SS-04 search is case-insensitive", async ({ page }) => {
     await setupApp(page, {
-      conversations: [
-        makeConversation({ title: "Hello World" }),
-      ],
+      conversations: [makeConversation({ title: "Hello World" })],
     });
 
     const searchInput = page.getByPlaceholder("Search conversations…");
     await searchInput.fill("hello");
 
-    await expect(page.locator("span.truncate").filter({ hasText: "Hello World" })).toBeVisible();
+    await expect(
+      page.locator("span.truncate").filter({ hasText: "Hello World" }),
+    ).toBeVisible();
   });
 });

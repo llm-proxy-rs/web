@@ -18,7 +18,10 @@ test.describe("audit fixes", () => {
     await page.addInitScript(() => {
       localStorage.setItem(
         "chat_running_task_test-vm",
-        JSON.stringify({ task_id: "task-reconnect-1", running_session_id: "conv-reconnect-1" }),
+        JSON.stringify({
+          task_id: "task-reconnect-1",
+          running_session_id: "conv-reconnect-1",
+        }),
       );
     });
 
@@ -29,7 +32,10 @@ test.describe("audit fixes", () => {
         `event: done\ndata: ${JSON.stringify({ session_id: "sess-r", task_id: "task-reconnect-1", conversation_id: "conv-reconnect-1" })}\n\n`;
       await route.fulfill({
         status: 200,
-        headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
+        headers: {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+        },
         body,
       });
     });
@@ -64,7 +70,9 @@ test.describe("audit fixes", () => {
     await expect(page.getByText("Hello multi-line")).toBeVisible();
   });
 
-  test("AF-03 file uploads sanitize path separators from filenames", async ({ page }) => {
+  test("AF-03 file uploads sanitize path separators from filenames", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, { sessions: [] });
 
     // Intercept upload to capture the path form field
@@ -80,9 +88,13 @@ test.describe("audit fixes", () => {
     // Create a file with path separators in its name via the file input
     await page.evaluate(() => {
       const dt = new DataTransfer();
-      const file = new File(["hello"], "../../etc/passwd", { type: "text/plain" });
+      const file = new File(["hello"], "../../etc/passwd", {
+        type: "text/plain",
+      });
       dt.items.add(file);
-      const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+      const input = document.querySelector(
+        'input[type="file"]',
+      ) as HTMLInputElement;
       // The file input doesn't allow setting the files property with path separators in
       // the File name reliably across browsers. Instead we test the component logic.
     });
@@ -93,7 +105,9 @@ test.describe("audit fixes", () => {
     await expect(page.getByPlaceholder("Message Claude…")).toBeVisible();
   });
 
-  test("AF-04 clipboard failure does not show Copied! feedback", async ({ page }) => {
+  test("AF-04 clipboard failure does not show Copied! feedback", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, { sessions: [] });
 
     await sendMessage(page, "Hello");
@@ -103,7 +117,8 @@ test.describe("audit fixes", () => {
 
     // Override clipboard API to reject
     await page.evaluate(() => {
-      navigator.clipboard.writeText = () => Promise.reject(new Error("clipboard blocked"));
+      navigator.clipboard.writeText = () =>
+        Promise.reject(new Error("clipboard blocked"));
     });
 
     // Hover over the assistant message to show the copy button
@@ -120,12 +135,18 @@ test.describe("audit fixes", () => {
     await expect(page.getByTitle("Copy failed")).toBeVisible();
   });
 
-  test("AF-05 diff viewer shows truncation warning for >200 line inputs", async ({ page }) => {
+  test("AF-05 diff viewer shows truncation warning for >200 line inputs", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, { sessions: [] });
 
     // Generate a large file content (>200 lines)
-    const bigOld = Array.from({ length: 250 }, (_, i) => `old line ${i}`).join("\n");
-    const bigNew = Array.from({ length: 250 }, (_, i) => `new line ${i}`).join("\n");
+    const bigOld = Array.from({ length: 250 }, (_, i) => `old line ${i}`).join(
+      "\n",
+    );
+    const bigNew = Array.from({ length: 250 }, (_, i) => `new line ${i}`).join(
+      "\n",
+    );
 
     await sendMessage(page, "Show big diff");
     ctrl.sendSseEvents([
@@ -136,15 +157,26 @@ test.describe("audit fixes", () => {
         data: {
           id: "tool-diff",
           name: "Edit",
-          input: { file_path: "/tmp/big.txt", old_string: bigOld, new_string: bigNew },
+          input: {
+            file_path: "/tmp/big.txt",
+            old_string: bigOld,
+            new_string: bigNew,
+          },
         },
       },
       {
         event: "tool_result",
-        data: { tool_use_id: "tool-diff", content: "Applied edit", is_error: false },
+        data: {
+          tool_use_id: "tool-diff",
+          content: "Applied edit",
+          is_error: false,
+        },
       },
       { event: "text_delta", data: { text: "Done editing." } },
-      { event: "done", data: { session_id: "sess-diff", task_id: "client-sess-test" } },
+      {
+        event: "done",
+        data: { session_id: "sess-diff", task_id: "client-sess-test" },
+      },
     ]);
 
     await expect(page.getByText("Done editing.")).toBeVisible();

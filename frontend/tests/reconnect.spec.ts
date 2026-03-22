@@ -17,23 +17,33 @@ const TASK_ID = "task-reconnect-test";
 const CONV_ID = "conv-reconnect-test";
 
 test.describe("reconnect", () => {
-  test("RC-01 reconnect stream opened with saved task_id and conversation_id", async ({ page }) => {
-    await page.addInitScript((args: { vmId: string; taskId: string; convId: string }) => {
-      localStorage.setItem(
-        `chat_running_task_${args.vmId}`,
-        JSON.stringify({ task_id: args.taskId, running_session_id: args.convId }),
-      );
-    }, { vmId: VM_ID, taskId: "task-rc01", convId: "conv-rc01" });
+  test("RC-01 reconnect stream opened with saved task_id and conversation_id", async ({
+    page,
+  }) => {
+    await page.addInitScript(
+      (args: { vmId: string; taskId: string; convId: string }) => {
+        localStorage.setItem(
+          `chat_running_task_${args.vmId}`,
+          JSON.stringify({
+            task_id: args.taskId,
+            running_session_id: args.convId,
+          }),
+        );
+      },
+      { vmId: VM_ID, taskId: "task-rc01", convId: "conv-rc01" },
+    );
 
     // Set up waitForRequest before setupApp so it captures the request fired during page load
-    const streamReqPromise = page.waitForRequest((r) =>
-      r.url().includes("chat-stream/task-rc01") && r.method() === "GET",
+    const streamReqPromise = page.waitForRequest(
+      (r) => r.url().includes("chat-stream/task-rc01") && r.method() === "GET",
     );
 
     const ctrl = await setupApp(page, {});
 
     // Deliver done to unblock the route handler and clean up
-    ctrl.sendSseEvents([{ event: "done", data: { session_id: null, task_id: "task-rc01" } }]);
+    ctrl.sendSseEvents([
+      { event: "done", data: { session_id: null, task_id: "task-rc01" } },
+    ]);
 
     const streamReq = await streamReqPromise;
 
@@ -45,12 +55,18 @@ test.describe("reconnect", () => {
   });
 
   test("RC-02 question panel restored after reconnect", async ({ page }) => {
-    await page.addInitScript((args: { vmId: string; taskId: string; convId: string }) => {
-      localStorage.setItem(
-        `chat_running_task_${args.vmId}`,
-        JSON.stringify({ task_id: args.taskId, running_session_id: args.convId }),
-      );
-    }, { vmId: VM_ID, taskId: "task-rc02", convId: "conv-rc02" });
+    await page.addInitScript(
+      (args: { vmId: string; taskId: string; convId: string }) => {
+        localStorage.setItem(
+          `chat_running_task_${args.vmId}`,
+          JSON.stringify({
+            task_id: args.taskId,
+            running_session_id: args.convId,
+          }),
+        );
+      },
+      { vmId: VM_ID, taskId: "task-rc02", convId: "conv-rc02" },
+    );
 
     const ctrl = await setupApp(page, {});
 
@@ -60,7 +76,12 @@ test.describe("reconnect", () => {
         data: {
           request_id: "req-rc02",
           task_id: "task-rc02",
-          questions: [{ question: "Pick one?", options: [{ label: "A" }, { label: "B" }] }],
+          questions: [
+            {
+              question: "Pick one?",
+              options: [{ label: "A" }, { label: "B" }],
+            },
+          ],
         },
       },
     ]);
@@ -68,20 +89,32 @@ test.describe("reconnect", () => {
     await expect(page.getByText("Pick one?")).toBeVisible();
 
     // Clean up
-    ctrl.sendSseEvents([{ event: "done", data: { session_id: null, task_id: "task-rc02" } }]);
+    ctrl.sendSseEvents([
+      { event: "done", data: { session_id: null, task_id: "task-rc02" } },
+    ]);
   });
 
-  test("RC-03 done event after reconnect clears running state", async ({ page }) => {
-    await page.addInitScript((args: { vmId: string; taskId: string; convId: string }) => {
-      localStorage.setItem(
-        `chat_running_task_${args.vmId}`,
-        JSON.stringify({ task_id: args.taskId, running_session_id: args.convId }),
-      );
-    }, { vmId: VM_ID, taskId: "task-rc03", convId: "conv-rc03" });
+  test("RC-03 done event after reconnect clears running state", async ({
+    page,
+  }) => {
+    await page.addInitScript(
+      (args: { vmId: string; taskId: string; convId: string }) => {
+        localStorage.setItem(
+          `chat_running_task_${args.vmId}`,
+          JSON.stringify({
+            task_id: args.taskId,
+            running_session_id: args.convId,
+          }),
+        );
+      },
+      { vmId: VM_ID, taskId: "task-rc03", convId: "conv-rc03" },
+    );
 
     const ctrl = await setupApp(page, {});
 
-    ctrl.sendSseEvents([{ event: "done", data: { session_id: null, task_id: "task-rc03" } }]);
+    ctrl.sendSseEvents([
+      { event: "done", data: { session_id: null, task_id: "task-rc03" } },
+    ]);
 
     await expect(page.getByRole("status")).not.toBeVisible();
 
@@ -93,21 +126,44 @@ test.describe("reconnect", () => {
     expect(storedTask).toBeNull();
   });
 
-  test("RC-04 messages restored from localStorage on reconnect", async ({ page }) => {
+  test("RC-04 messages restored from localStorage on reconnect", async ({
+    page,
+  }) => {
     const savedMessages = JSON.stringify([
       { id: "msg-1", type: "user", content: "Hello", timestamp: Date.now() },
-      { id: "msg-2", type: "assistant", content: "Prior response", timestamp: Date.now() },
+      {
+        id: "msg-2",
+        type: "assistant",
+        content: "Prior response",
+        timestamp: Date.now(),
+      },
     ]);
 
     await page.addInitScript(
-      (args: { vmId: string; taskId: string; convId: string; messages: string }) => {
+      (args: {
+        vmId: string;
+        taskId: string;
+        convId: string;
+        messages: string;
+      }) => {
         localStorage.setItem(
           `chat_running_task_${args.vmId}`,
-          JSON.stringify({ task_id: args.taskId, running_session_id: args.convId }),
+          JSON.stringify({
+            task_id: args.taskId,
+            running_session_id: args.convId,
+          }),
         );
-        localStorage.setItem(`chat_messages_task_${args.taskId}`, args.messages);
+        localStorage.setItem(
+          `chat_messages_task_${args.taskId}`,
+          args.messages,
+        );
       },
-      { vmId: VM_ID, taskId: "task-rc04", convId: "conv-rc04", messages: savedMessages },
+      {
+        vmId: VM_ID,
+        taskId: "task-rc04",
+        convId: "conv-rc04",
+        messages: savedMessages,
+      },
     );
 
     const ctrl = await setupApp(page, {});
@@ -116,7 +172,9 @@ test.describe("reconnect", () => {
     await expect(page.getByText("Prior response")).toBeVisible();
 
     // Deliver done to clean up
-    ctrl.sendSseEvents([{ event: "done", data: { session_id: null, task_id: "task-rc04" } }]);
+    ctrl.sendSseEvents([
+      { event: "done", data: { session_id: null, task_id: "task-rc04" } },
+    ]);
   });
 
   test("RC-05 corrupt running-task localStorage is cleared silently, no reconnect stream opened", async ({
@@ -136,13 +194,16 @@ test.describe("reconnect", () => {
 
     // Wait for the corrupt entry to be cleared
     await page.waitForFunction(
-      (vmId: string) => localStorage.getItem(`chat_running_task_${vmId}`) === null,
+      (vmId: string) =>
+        localStorage.getItem(`chat_running_task_${vmId}`) === null,
       VM_ID,
     );
 
     expect(reconnectCalled).toBe(false);
     // Composer still accessible — app has not crashed
-    await expect(page.locator('textarea[placeholder="Message Claude…"]')).toBeVisible();
+    await expect(
+      page.locator('textarea[placeholder="Message Claude…"]'),
+    ).toBeVisible();
   });
 
   test("RC-06 corrupt messages localStorage is ignored, reconnect fires without restoring messages", async ({
@@ -152,10 +213,16 @@ test.describe("reconnect", () => {
       (args: { vmId: string; taskId: string; convId: string }) => {
         localStorage.setItem(
           `chat_running_task_${args.vmId}`,
-          JSON.stringify({ task_id: args.taskId, running_session_id: args.convId }),
+          JSON.stringify({
+            task_id: args.taskId,
+            running_session_id: args.convId,
+          }),
         );
         // Store invalid JSON for the messages key
-        localStorage.setItem(`chat_messages_task_${args.taskId}`, "[[broken json");
+        localStorage.setItem(
+          `chat_messages_task_${args.taskId}`,
+          "[[broken json",
+        );
       },
       { vmId: VM_ID, taskId: "task-rc06", convId: "conv-rc06" },
     );
@@ -163,11 +230,15 @@ test.describe("reconnect", () => {
     const ctrl = await setupApp(page, {});
 
     // done event clears the running state; if messages parse had crashed the app this would hang
-    ctrl.sendSseEvents([{ event: "done", data: { session_id: null, task_id: "task-rc06" } }]);
+    ctrl.sendSseEvents([
+      { event: "done", data: { session_id: null, task_id: "task-rc06" } },
+    ]);
 
     // No prior messages restored (parse failed silently)
     await expect(page.getByText("Prior response")).not.toBeVisible();
     // App still functional
-    await expect(page.locator('textarea[placeholder="Message Claude…"]')).toBeVisible();
+    await expect(
+      page.locator('textarea[placeholder="Message Claude…"]'),
+    ).toBeVisible();
   });
 });

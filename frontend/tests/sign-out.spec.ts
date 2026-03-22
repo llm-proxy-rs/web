@@ -30,7 +30,11 @@ test.describe("sign out", () => {
 
     // Mock /login so the subsequent navigation doesn't error
     await page.route("**/login", (route) =>
-      route.fulfill({ status: 200, contentType: "text/html", body: "<html><body>Login</body></html>" }),
+      route.fulfill({
+        status: 200,
+        contentType: "text/html",
+        body: "<html><body>Login</body></html>",
+      }),
     );
 
     // Click sign out

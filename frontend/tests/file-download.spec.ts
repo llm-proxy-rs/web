@@ -7,12 +7,12 @@ import { test, expect } from "@playwright/test";
 import { setupApp } from "./helpers/setup";
 
 test.describe("file download", () => {
-  test("clicking a file triggers download with correct path", async ({ page }) => {
+  test("clicking a file triggers download with correct path", async ({
+    page,
+  }) => {
     await setupApp(page, {
       files: {
-        "/tmp": [
-          { name: "readme.txt", is_dir: false, size: 1024 },
-        ],
+        "/tmp": [{ name: "readme.txt", is_dir: false, size: 1024 }],
       },
     });
 
@@ -25,7 +25,9 @@ test.describe("file download", () => {
       (window as unknown as Record<string, unknown>).__openedUrl = "";
       const origOpen = window.open;
       window.open = (url?: string | URL, ...args: unknown[]) => {
-        (window as unknown as Record<string, unknown>).__openedUrl = String(url ?? "");
+        (window as unknown as Record<string, unknown>).__openedUrl = String(
+          url ?? "",
+        );
         return null;
       };
     });
@@ -34,7 +36,9 @@ test.describe("file download", () => {
     await page.getByText("readme.txt").click();
 
     // Check the intercepted URL
-    const openedUrl = await page.evaluate(() => (window as unknown as Record<string, string>).__openedUrl);
+    const openedUrl = await page.evaluate(
+      () => (window as unknown as Record<string, string>).__openedUrl,
+    );
     expect(openedUrl).toContain("/download?path=");
     expect(openedUrl).toContain("readme.txt");
   });
@@ -42,9 +46,7 @@ test.describe("file download", () => {
   test("directory row shows a download-as-zip link", async ({ page }) => {
     await setupApp(page, {
       files: {
-        "/tmp": [
-          { name: "my-folder", is_dir: true, size: 0 },
-        ],
+        "/tmp": [{ name: "my-folder", is_dir: true, size: 0 }],
       },
     });
 
