@@ -160,7 +160,7 @@ async fn launch_vm(
     create_tap(
         &vm_config.net_helper_path,
         tap_name,
-        &format_tap_ip(net_idx),
+        &format_tap_ip(net_idx)?,
     )
     .await?;
     let mac = format_guest_mac(net_idx);

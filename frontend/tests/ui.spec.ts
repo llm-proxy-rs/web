@@ -1,8 +1,6 @@
 /**
  * UF-15  Dark mode toggle   — clicking toggle applies light mode
- * UF-16  Tab navigation     — Terminal tab shows terminal and files panels
- * UF-16b Files toggle       — Hide/show files panel in terminal tab
- * UF-17  Slash commands     — typing "/" opens menu; selecting fills composer
+ * UF-16  Tab navigation     — Terminal tab shows terminal panel
  */
 import { test, expect } from "@playwright/test";
 import { setupApp } from "./helpers/setup";
@@ -25,19 +23,17 @@ test.describe("ui", () => {
   });
 
   test("UF-16 tab navigation shows correct panels", async ({ page }) => {
-    await setupApp(page, { files: { "/tmp": [] } });
+    await setupApp(page, {});
 
     // Chat tab is active by default — composer is visible
     const composer = page.getByPlaceholder("Message Claude…");
     await expect(composer).toBeVisible();
 
-    // Navigate to Terminal tab — shows terminal and files panel together
+    // Navigate to Terminal tab — shows terminal
     const terminalTab = page.getByTitle("Terminal");
     await terminalTab.click();
     // Terminal panel is present (renders a black bg container)
     await expect(page.locator(".bg-black").first()).toBeVisible();
-    // Files panel is visible within the terminal tab
-    await expect(page.getByText("Files")).toBeVisible();
     // Chat composer is hidden
     await expect(composer).not.toBeVisible();
 
@@ -45,50 +41,5 @@ test.describe("ui", () => {
     const chatTab = page.getByTitle("Chat");
     await chatTab.click();
     await expect(composer).toBeVisible();
-  });
-
-  test("UF-16b hide and show files panel in terminal tab", async ({ page }) => {
-    await setupApp(page, { files: { "/tmp": [] } });
-
-    // Navigate to Terminal tab — files panel is visible by default
-    await page.getByTitle("Terminal").click();
-    await expect(page.getByText("Files")).toBeVisible();
-
-    // Click the hide button to collapse the files panel
-    await page.getByTitle("Hide files").click();
-    await expect(page.getByText("Files")).not.toBeVisible();
-
-    // The "Show files" button appears
-    await expect(page.getByTitle("Show files")).toBeVisible();
-
-    // Click it to restore the files panel
-    await page.getByTitle("Show files").click();
-    await expect(page.getByText("Files")).toBeVisible();
-  });
-
-  test("UF-17a slash command menu appears when typing /", async ({ page }) => {
-    await setupApp(page);
-
-    await page.getByPlaceholder("Message Claude…").type("/");
-
-    // Command menu becomes visible
-    await expect(page.getByText("/help")).toBeVisible();
-    await expect(page.getByText("/clear")).toBeVisible();
-  });
-
-  test("UF-17b selecting a slash command fills the composer", async ({ page }) => {
-    await setupApp(page);
-
-    const composer = page.getByPlaceholder("Message Claude…");
-    await composer.type("/");
-
-    // Click the /clear command
-    await page.getByRole("button", { name: /\/clear/ }).click();
-
-    // Composer is filled with the command
-    await expect(composer).toHaveValue("/clear ");
-
-    // Menu closes after selection
-    await expect(page.getByText("/help")).not.toBeVisible();
   });
 });

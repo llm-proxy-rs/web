@@ -1,6 +1,6 @@
 /**
  * UF-06  Empty thinking removed  — animated dots gone when no thinking_delta arrives
- * UF-07  Thinking hidden       — thinking content is hidden from chat view
+ * UF-07  Thinking visible       — thinking content is shown in the chat view
  * UF-07b Claude header after thinking — assistant text after thinking shows Claude header
  * UF-08  Tool use with result    — tool card shows result after tool_result event
  * UF-09  Stop streaming          — Stop button sends stop request
@@ -29,7 +29,7 @@ test.describe("streaming", () => {
     await expect(thinkingIndicator).not.toBeVisible();
   });
 
-  test("UF-07 thinking content is hidden from the chat view", async ({
+  test("UF-07 thinking content is visible in the chat view", async ({
     page,
   }) => {
     const ctrl = await setupApp(page, { sessions: [] });
@@ -39,8 +39,11 @@ test.describe("streaming", () => {
 
     // The assistant response is shown
     await expect(page.getByText("The answer is 42.")).toBeVisible();
-    // Thinking block is NOT visible — thinking is hidden from chat
-    await expect(page.getByText("Thinking…")).not.toBeVisible();
+    // Thinking block is visible as a collapsible section
+    await expect(page.getByText("Thinking")).toBeVisible();
+    // Expand the thinking block to see the content
+    await page.getByText("Thinking").click();
+    await expect(page.getByText("My reasoning here…")).toBeVisible();
   });
 
   test("UF-07b assistant text after thinking block shows Claude header", async ({
@@ -81,17 +84,20 @@ test.describe("streaming", () => {
     await expect(page.getByText("Done.")).toBeVisible();
   });
 
-  test("UF-09 clicking Stop sends a stop request to the server", async ({ page }) => {
+  test("UF-09 clicking Stop aborts the in-flight request when task_id is not yet available", async ({ page }) => {
     const ctrl = await setupApp(page, { sessions: [] });
 
     // Send a message so the streaming state activates (no SSE events yet)
     await sendMessage(page, "Long task");
 
-    // The stop button is in the ClaudeStatus bar while streaming
+    // The stop button is in the composer while streaming
     await expect(page.getByRole("status")).toBeVisible();
     await page.getByTitle("Stop (Esc)").first().click();
 
-    expect(ctrl.stopRequested()).toBe(true);
+    // No task_id available yet, so no /chat-stop POST — instead the fetch is aborted
+    // and the running state is cleared (composer re-enabled)
+    expect(ctrl.stopRequested()).toBe(false);
+    await expect(page.locator('textarea[placeholder="Message Claude…"]')).toBeEnabled();
   });
 
   test("UF-10 ask user question panel shown and answer submitted", async ({ page }) => {

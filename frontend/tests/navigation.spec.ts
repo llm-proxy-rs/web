@@ -49,7 +49,7 @@ test.describe("navigation during streaming", () => {
 
     // done fires → stays hidden, view stays blank (no navigation to the new conversation)
     await expect(page.getByRole("status")).not.toBeVisible();
-    await expect(page.getByText("Start a new conversation")).toBeVisible();
+    await expect(page.getByText("Welcome back")).toBeVisible();
   });
 
   test("UF-35b error fires after a stale New Chat click — no error shown in blank view", async ({ page }) => {
@@ -63,7 +63,7 @@ test.describe("navigation during streaming", () => {
 
     // error_event fires for an orphaned stream — error is silently discarded from blank view
     await expect(page.getByText("something went wrong")).not.toBeVisible();
-    await expect(page.getByText("Start a new conversation")).toBeVisible();
+    await expect(page.getByText("Welcome back")).toBeVisible();
   });
 
   test("UF-36 new session appears in the sidebar even when New Chat was clicked mid-stream", async ({
@@ -83,7 +83,7 @@ test.describe("navigation during streaming", () => {
       page.locator("span.truncate").filter({ hasText: "My stale session" }),
     ).toBeVisible();
     // But the current view is still blank — no navigation to the stale conversation
-    await expect(page.getByText("Start a new conversation")).toBeVisible();
+    await expect(page.getByText("Welcome back")).toBeVisible();
   });
 
   // ── Existing-session streaming ────────────────────────────────────────────
@@ -157,7 +157,7 @@ test.describe("navigation during streaming", () => {
     // Status bar stays hidden (we are not viewing Running Session)
     await expect(page.getByRole("status")).not.toBeVisible();
     // The new-chat blank state is unchanged
-    await expect(page.getByText("Start a new conversation")).toBeVisible();
+    await expect(page.getByText("Welcome back")).toBeVisible();
   });
 
   // ── Cross-session navigation ───────────────────────────────────────────────

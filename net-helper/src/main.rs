@@ -105,21 +105,132 @@ fn cmd_tap_delete(tap_name: &str) -> Result<()> {
 
 fn cmd_setup_nat(iface: &str) -> Result<()> {
     std::fs::write("/proc/sys/net/ipv4/ip_forward", "1").context("failed to enable ip_forward")?;
-    run_cmd("iptables", &["-P", "FORWARD", "ACCEPT"])?;
-    let _ = Command::new("iptables")
-        .args([
-            "-t",
-            "nat",
-            "-D",
-            "POSTROUTING",
+
+    // ── FORWARD chain ────────────────────────────────────────────────
+    // -I prepends, so the final rule order is the reverse of insertion.
+    //
+    // Final FORWARD chain order:
+    //   1. DROP  172.16.0.0/16 → 169.254.0.0/16   (link-local)
+    //   2. DROP  172.16.0.0/16 → 192.168.0.0/16   (RFC 1918)
+    //   3. DROP  172.16.0.0/16 → 172.16.0.0/12    (RFC 1918)
+    //   4. DROP  172.16.0.0/16 → 10.0.0.0/8       (RFC 1918)
+    //   5. ACCEPT 172.16.0.0/16 -o <iface>         (internet-bound)
+    //   6. ACCEPT conntrack ESTABLISHED,RELATED     (return traffic)
+    //   policy: DROP
+    //
+    // Private-network DROPs match first, then internet-bound ACCEPT,
+    // then conntrack for reply packets. Everything else hits DROP policy.
+
+    // Default deny on FORWARD — only explicitly allowed traffic passes.
+    run_cmd("iptables", &["-P", "FORWARD", "DROP"])?;
+
+    ensure_rule(
+        "iptables",
+        &[
+            "-I",
+            "FORWARD",
+            "-m",
+            "conntrack",
+            "--ctstate",
+            "ESTABLISHED,RELATED",
+            "-j",
+            "ACCEPT",
+        ],
+    )?;
+    ensure_rule(
+        "iptables",
+        &[
+            "-I",
+            "FORWARD",
+            "-s",
+            "172.16.0.0/16",
             "-o",
             iface,
             "-j",
-            "MASQUERADE",
-        ])
-        .stderr(std::process::Stdio::null())
-        .status();
-    run_cmd(
+            "ACCEPT",
+        ],
+    )?;
+    ensure_rule(
+        "iptables",
+        &[
+            "-I",
+            "FORWARD",
+            "-s",
+            "172.16.0.0/16",
+            "-d",
+            "10.0.0.0/8",
+            "-j",
+            "DROP",
+        ],
+    )?;
+    ensure_rule(
+        "iptables",
+        &[
+            "-I",
+            "FORWARD",
+            "-s",
+            "172.16.0.0/16",
+            "-d",
+            "172.16.0.0/12",
+            "-j",
+            "DROP",
+        ],
+    )?;
+    ensure_rule(
+        "iptables",
+        &[
+            "-I",
+            "FORWARD",
+            "-s",
+            "172.16.0.0/16",
+            "-d",
+            "192.168.0.0/16",
+            "-j",
+            "DROP",
+        ],
+    )?;
+    ensure_rule(
+        "iptables",
+        &[
+            "-I",
+            "FORWARD",
+            "-s",
+            "172.16.0.0/16",
+            "-d",
+            "169.254.0.0/16",
+            "-j",
+            "DROP",
+        ],
+    )?;
+
+    // ── INPUT chain ─────────────────────────────────────────────────
+    // Final INPUT chain order:
+    //   1. ACCEPT 172.16.0.0/16 conntrack ESTABLISHED,RELATED
+    //   2. DROP   172.16.0.0/16
+    //
+    // ESTABLISHED/RELATED is on top so the host can SSH into VMs
+    // (reply packets are allowed). All other VM→host traffic is dropped.
+    ensure_rule(
+        "iptables",
+        &["-I", "INPUT", "-s", "172.16.0.0/16", "-j", "DROP"],
+    )?;
+    ensure_rule(
+        "iptables",
+        &[
+            "-I",
+            "INPUT",
+            "-s",
+            "172.16.0.0/16",
+            "-m",
+            "conntrack",
+            "--ctstate",
+            "ESTABLISHED,RELATED",
+            "-j",
+            "ACCEPT",
+        ],
+    )?;
+
+    ensure_rule(
         "iptables",
         &[
             "-t",
@@ -132,6 +243,24 @@ fn cmd_setup_nat(iface: &str) -> Result<()> {
             "MASQUERADE",
         ],
     )
+}
+
+/// Add a rule only if it doesn't already exist (-C checks).
+fn ensure_rule(prog: &str, args: &[&str]) -> Result<()> {
+    let check_args: Vec<&str> = args
+        .iter()
+        .map(|a| if *a == "-I" || *a == "-A" { "-C" } else { a })
+        .collect();
+    let status = Command::new(prog)
+        .args(&check_args)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .with_context(|| format!("failed to run {prog}"))?;
+    if status.success() {
+        return Ok(());
+    }
+    run_cmd(prog, args)
 }
 
 fn raise_ambient_net_admin() -> Result<()> {

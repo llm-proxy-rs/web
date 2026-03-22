@@ -48,13 +48,26 @@ async fn write_zip(
     writer: DuplexStream,
 ) {
     let mut zip = ZipFileWriter::with_tokio(writer);
+    let result = write_zip_entries(&sftp, &dir_path, &upload_dir, &mut zip).await;
+    let _ = zip.close().await;
+    if let Err(e) = result {
+        tracing::warn!("zip write failed: {e}");
+    }
+}
+
+async fn write_zip_entries(
+    sftp: &SftpSession,
+    dir_path: &Path,
+    upload_dir: &Path,
+    zip: &mut ZipFileWriter<DuplexStream>,
+) -> Result<()> {
     let mut total_bytes: usize = 0;
-    let mut dirs_to_visit: Vec<(PathBuf, usize)> = vec![(dir_path.clone(), 0)];
+    let mut dirs_to_visit: Vec<(PathBuf, usize)> = vec![(dir_path.to_owned(), 0)];
     while let Some((dir, depth)) = dirs_to_visit.pop() {
-        let Some(dir_str) = dir.to_str() else { return };
+        let dir_str = dir.to_str().context("directory path is not valid UTF-8")?;
         let read_dir = match sftp.read_dir(dir_str).await {
             Ok(entries) => entries,
-            Err(_) => return,
+            Err(_) => continue,
         };
         for entry in read_dir {
             let file_name = entry.file_name();
@@ -65,7 +78,7 @@ async fn write_zip(
             if entry.file_type().is_symlink() {
                 continue;
             }
-            if validate_within_dir(&child_path, &upload_dir).is_err() {
+            if validate_within_dir(&child_path, upload_dir).is_err() {
                 continue;
             }
             if entry.file_type().is_dir() {
@@ -74,29 +87,17 @@ async fn write_zip(
                 }
                 continue;
             }
-            let relative = match child_path
-                .strip_prefix(&dir_path)
+            let relative = child_path
+                .strip_prefix(dir_path)
                 .unwrap_or(&child_path)
                 .to_str()
-            {
-                Some(s) => s.to_owned(),
-                None => return,
-            };
-            if stream_sftp_file_to_zip_entry(
-                &sftp,
-                &child_path,
-                &relative,
-                &mut zip,
-                &mut total_bytes,
-            )
-            .await
-            .is_err()
-            {
-                return;
-            }
+                .context("file path is not valid UTF-8")?
+                .to_owned();
+            stream_sftp_file_to_zip_entry(sftp, &child_path, &relative, zip, &mut total_bytes)
+                .await?;
         }
     }
-    let _ = zip.close().await;
+    Ok(())
 }
 
 async fn stream_sftp_file_to_zip_entry(

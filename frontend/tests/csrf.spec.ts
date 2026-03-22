@@ -43,6 +43,28 @@ test.describe("csrf", () => {
     expect(bodies[1].csrf_token).toBe("rotated-1");
   });
 
+  test("UF-56 token rotated on model change — next POST /chat uses rotated token", async ({ page }) => {
+    const ctrl = await setupApp(page, {});
+
+    // Change the model — server responds with a rotated token
+    ctrl.setSettingsResponseToken("rotated-settings-1");
+    const settingsResponse = page.waitForResponse(
+      (res) => res.url().includes("/api/settings") && res.request().method() === "PUT",
+    );
+    // Open model chip dropdown and select a different model
+    await page.locator("button", { hasText: /Sonnet/i }).first().click();
+    await page.locator("button", { hasText: "Opus" }).first().click();
+    await settingsResponse;
+
+    // Now send a chat message — must carry the rotated token, not the original
+    ctrl.sendSseEvents([{ event: "done", data: { session_id: null, task_id: "t1" } }]);
+    const chatResponse = page.waitForResponse("**/chat");
+    await sendMessage(page, "after model change");
+    await chatResponse;
+
+    expect(ctrl.allChatBodies()[0].csrf_token).toBe("rotated-settings-1");
+  });
+
   test("UF-55 DELETE /chat-transcript uses the rotated token after a send", async ({ page }) => {
     const ctrl = await setupApp(page, {
       conversations: [makeConversation({ sessionId: "sess-del", projectDir: "/home/ubuntu", title: "to delete" })],

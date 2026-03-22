@@ -154,11 +154,14 @@ export interface SettingsData {
   uses_bedrock: boolean;
   has_api_key: boolean;
   base_url: string | null;
+  model: string | null;
+  gateway_configured: boolean;
 }
 
 // ── App HTML ──────────────────────────────────────────────────────────────
 
-function buildAppHtml(hasUserRootfs: boolean): string {
+function buildAppHtml(hasUserRootfs: boolean, vmId?: string): string {
+  const effectiveVmId = vmId ?? VM_ID;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -169,7 +172,7 @@ function buildAppHtml(hasUserRootfs: boolean): string {
 </head>
 <body class="flex h-screen overflow-hidden bg-background text-foreground">
   <div id="app-config" hidden
-    data-vm-id="${VM_ID}"
+    data-vm-id="${effectiveVmId}"
     data-csrf-token="${CSRF_TOKEN}"
     data-upload-dir="/tmp"
     data-upload-action="/chat-upload"
@@ -210,7 +213,7 @@ export interface AppController {
   /** Body of the most recent POST /chat-question-answer, or null. */
   lastAnswerBody(): { task_id: string; request_id: string; answers: Record<string, string> } | null;
   /** Body of the most recent PUT /api/settings, or null. */
-  lastSettingsSave(): { api_key: string } | null;
+  lastSettingsSave(): { api_key?: string; model?: string } | null;
   /** Whether an upload POST was received. */
   uploadReceived(): boolean;
   /** Raw form body of the most recent POST /rootfs/delete, or null. */
@@ -220,8 +223,15 @@ export interface AppController {
    * for the next POST /chat. Pass null to stop sending the header.
    */
   setChatResponseToken(token: string | null): void;
+  /**
+   * Set the token the mock will echo back in the x-csrf-token response header
+   * for the next PUT /api/settings. Pass null to stop sending the header.
+   */
+  setSettingsResponseToken(token: string | null): void;
   /** CSRF token sent in the most recent DELETE /chat-transcript, or null. */
   lastDeleteCsrfToken(): string | null;
+  /** Whether a renew-gateway-key request was received. */
+  renewGatewayKeyRequested(): boolean;
 }
 
 export interface SetupOpts {
@@ -236,10 +246,18 @@ export interface SetupOpts {
   settingsSaveError?: boolean;
   /** When true, data-has-user-rootfs is set to "true" so the reset button is rendered. */
   hasUserRootfs?: boolean;
-  /** When set, POST /chat returns 503 with this text instead of the normal 200 response. */
+  /** When set, POST /chat returns this text as an error instead of the normal 200 response. Defaults to status 500. */
   chatError?: string;
+  /** HTTP status code for chatError. Defaults to 500. */
+  chatErrorStatus?: number;
   /** When set, POST /chat-question-answer returns 500 with this text instead of the normal 200 response. */
   answerError?: string;
+  /** When true, POST /api/renew-gateway-key returns a 500 error. */
+  renewGatewayKeyError?: boolean;
+  /** When set, POST /api/renew-gateway-key returns a redirect URL. */
+  renewGatewayKeyRedirect?: string;
+  /** Override the vmId in app-config. Defaults to VM_ID ("test-vm"). Set to "" to test provisioning flow. */
+  vmId?: string;
 }
 
 export async function setupApp(
@@ -253,6 +271,8 @@ export async function setupApp(
     uses_bedrock: false,
     has_api_key: false,
     base_url: null,
+    model: "sonnet",
+    gateway_configured: false,
     ...opts.settings,
   };
 
@@ -260,11 +280,13 @@ export async function setupApp(
   let stopReceived = false;
   let lastStopBody: { task_id: string } | null = null;
   let lastAnswer: { task_id: string; request_id: string; answers: Record<string, string> } | null = null;
-  let lastSettingsSaveBody: { api_key: string } | null = null;
+  let lastSettingsSaveBody: { api_key?: string; model?: string } | null = null;
   let uploadWasReceived = false;
   let lastResetBody: string | null = null;
   let chatResponseToken: string | null = null;
+  let settingsResponseToken: string | null = null;
   let lastDeleteCsrfTokenValue: string | null = null;
+  let renewGatewayKeyReceived = false;
 
   // SSE event delivery — shared between POST /chat and GET /chat-stream/**
   let resolveSse: ((events: SseEvent[]) => void) | null = null;
@@ -290,7 +312,7 @@ export async function setupApp(
 
   // ── App HTML page ────────────────────────────────────────────────────────
   await page.route("http://localhost/", (route) =>
-    route.fulfill({ status: 200, contentType: "text/html", body: buildAppHtml(opts.hasUserRootfs ?? false) }),
+    route.fulfill({ status: 200, contentType: "text/html", body: buildAppHtml(opts.hasUserRootfs ?? false, opts.vmId) }),
   );
 
   // ── Static files ────────────────────────────────────────────────────────
@@ -354,14 +376,38 @@ export async function setupApp(
       if (opts.settingsSaveError) {
         await route.fulfill({ status: 500, body: "Internal Server Error" });
       } else {
-        lastSettingsSaveBody = route.request().postDataJSON() as { api_key: string };
-        await route.fulfill({ status: 200, body: "" });
+        lastSettingsSaveBody = route.request().postDataJSON() as { api_key?: string; model?: string };
+        const headers: Record<string, string> = {};
+        if (settingsResponseToken !== null) {
+          headers["x-csrf-token"] = settingsResponseToken;
+        }
+        await route.fulfill({ status: 200, headers, body: "" });
       }
     } else {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify(settingsData),
+      });
+    }
+  });
+
+  // ── Renew gateway key endpoint ──────────────────────────────────────────
+  await page.route("**/api/renew-gateway-key", async (route) => {
+    renewGatewayKeyReceived = true;
+    if (opts.renewGatewayKeyError) {
+      await route.fulfill({ status: 500, body: "Internal Server Error" });
+    } else if (opts.renewGatewayKeyRedirect) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ redirect: opts.renewGatewayKeyRedirect }),
+      });
+    } else {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ status: "ok" }),
       });
     }
   });
@@ -417,7 +463,7 @@ export async function setupApp(
     if (route.request().method() !== "POST") return route.continue();
 
     if (opts.chatError) {
-      await route.fulfill({ status: 503, body: opts.chatError });
+      await route.fulfill({ status: opts.chatErrorStatus ?? 500, body: opts.chatError });
       return;
     }
 
@@ -450,8 +496,12 @@ export async function setupApp(
 
   // ── Load the app ──────────────────────────────────────────────────────────
   await page.goto("http://localhost/", { waitUntil: "domcontentloaded" });
-  // Wait for React to render the composer
-  await page.waitForSelector('textarea[placeholder="Message Claude…"]');
+  // Wait for React to render — either the composer (VM ready) or loading spinner
+  if (opts.vmId === "") {
+    await page.waitForSelector("text=Starting environment");
+  } else {
+    await page.waitForSelector('textarea[placeholder="Message Claude…"]');
+  }
 
   return {
     sendSseEvents: (events) => {
@@ -478,7 +528,9 @@ export async function setupApp(
     uploadReceived: () => uploadWasReceived,
     lastResetFormData: () => lastResetBody,
     setChatResponseToken: (token) => { chatResponseToken = token; },
+    setSettingsResponseToken: (token) => { settingsResponseToken = token; },
     lastDeleteCsrfToken: () => lastDeleteCsrfTokenValue,
+    renewGatewayKeyRequested: () => renewGatewayKeyReceived,
   };
 }
 

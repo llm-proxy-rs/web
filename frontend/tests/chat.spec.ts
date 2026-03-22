@@ -1,5 +1,5 @@
 /**
- * UF-01  Blank new chat      — "Start a new conversation" shown when no conversations
+ * UF-01  Blank new chat      — "Welcome back" shown when no conversations
  * UF-02  Send message        — user bubble + status bar appear
  * UF-03  Receive response    — assistant message shown, status bar gone, conversation in sidebar
  * UF-04  New Chat button     — clears to blank state
@@ -14,7 +14,7 @@ test.describe("chat", () => {
   test("UF-01 blank state shown on load with no conversations", async ({ page }) => {
     await setupApp(page, {});
 
-    await expect(page.getByText("Start a new conversation")).toBeVisible();
+    await expect(page.getByText("Welcome back")).toBeVisible();
     await expect(page.getByText("No conversations yet")).toBeVisible();
   });
 
@@ -58,7 +58,7 @@ test.describe("chat", () => {
     // Now click New Chat
     await page.getByRole("button", { name: "New Chat" }).click();
 
-    await expect(page.getByText("Start a new conversation")).toBeVisible();
+    await expect(page.getByText("Welcome back")).toBeVisible();
     // No conversation highlighted in sidebar
     const activeRow = page.locator(".border-l-2.border-primary");
     await expect(activeRow).not.toBeVisible();
@@ -80,7 +80,7 @@ test.describe("chat", () => {
     ctrl.sendSseEvents(sse.text("Hi!", "sess-2"));
 
     // 4. The chat should remain blank — not navigated to the completed conversation
-    await expect(page.getByText("Start a new conversation")).toBeVisible();
+    await expect(page.getByText("Welcome back")).toBeVisible();
   });
 
   test("UF-59 sidebar shows first user message as title immediately after sending", async ({ page }) => {
@@ -103,7 +103,7 @@ test.describe("chat", () => {
 
     // Click New Chat and send a second message
     await page.getByRole("button", { name: "New Chat" }).click();
-    await expect(page.getByText("Start a new conversation")).toBeVisible();
+    await expect(page.getByText("Welcome back")).toBeVisible();
 
     await sendMessage(page, "Second message");
 

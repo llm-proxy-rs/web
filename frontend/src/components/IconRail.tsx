@@ -1,5 +1,6 @@
 import React from "react";
 import {
+  FolderOpen,
   LogOut,
   MessageSquare,
   Moon,
@@ -14,8 +15,12 @@ interface IconRailProps {
   activeTab: ViewTab;
   onTabChange: (tab: ViewTab) => void;
   hasUserRootfs: boolean;
-  csrfToken: string;
+  csrfFetch: (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ) => Promise<Response>;
   onSettingsOpen: () => void;
+  onFilesOpen: () => void;
   darkMode: boolean;
   onToggleDarkMode: () => void;
 }
@@ -24,13 +29,14 @@ export default function IconRail({
   activeTab,
   onTabChange,
   hasUserRootfs,
-  csrfToken,
+  csrfFetch,
   onSettingsOpen,
+  onFilesOpen,
   darkMode,
   onToggleDarkMode,
 }: IconRailProps) {
   return (
-    <div className="flex w-12 flex-col items-center gap-0.5 border-r border-border bg-card py-3">
+    <div className="hidden w-12 flex-col items-center gap-1 border-r border-border bg-card py-3 md:flex">
       <NavButton
         active={activeTab === "chat"}
         title="Chat"
@@ -45,9 +51,12 @@ export default function IconRail({
       >
         <Terminal className="h-4 w-4" />
       </NavButton>
+      <NavButton title="Files" onClick={onFilesOpen}>
+        <FolderOpen className="h-4 w-4" />
+      </NavButton>
 
-      <div className="mt-auto flex flex-col items-center gap-0.5">
-        {hasUserRootfs && <ResetButton csrfToken={csrfToken} />}
+      <div className="mt-auto flex flex-col items-center gap-1">
+        {hasUserRootfs && <ResetButton csrfFetch={csrfFetch} />}
         <NavButton
           title={darkMode ? "Light mode" : "Dark mode"}
           onClick={onToggleDarkMode}
@@ -63,8 +72,9 @@ export default function IconRail({
         </NavButton>
         <NavButton
           title="Sign out"
-          onClick={() => {
-            window.location.href = "/logout";
+          onClick={async () => {
+            await csrfFetch("/logout", { method: "POST" });
+            window.location.href = "/login";
           }}
         >
           <LogOut className="h-4 w-4" />
@@ -89,9 +99,9 @@ function NavButton({
     <button
       title={title}
       onClick={onClick}
-      className={`relative flex h-9 w-9 items-center justify-center rounded-lg ${
+      className={`relative flex h-9 w-9 items-center justify-center rounded-lg transition-all duration-150 ${
         active
-          ? "bg-primary/15 text-primary shadow-sm ring-1 ring-primary/20"
+          ? "bg-primary/15 text-primary shadow-sm shadow-primary/10 ring-1 ring-primary/20"
           : "text-muted-foreground hover:bg-accent hover:text-foreground"
       }`}
     >
@@ -103,18 +113,32 @@ function NavButton({
   );
 }
 
-function ResetButton({ csrfToken }: { csrfToken: string }) {
+function ResetButton({
+  csrfFetch,
+}: {
+  csrfFetch: (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ) => Promise<Response>;
+}) {
   const [open, setOpen] = React.useState(false);
 
   const handleReset = React.useCallback(async () => {
-    const res = await fetch("/rootfs/delete", {
+    const res = await csrfFetch("/rootfs/delete", {
       method: "POST",
-      headers: { "x-csrf-token": csrfToken },
     });
     if (res.ok || res.status === 303) {
+      // Clear cached conversations and messages so they don't reappear after reset
+      const keysToRemove = Object.keys(localStorage).filter(
+        (k) =>
+          k.startsWith("chat_messages_") ||
+          k.startsWith("conversations_") ||
+          k.startsWith("chat_running_task_"),
+      );
+      keysToRemove.forEach((k) => localStorage.removeItem(k));
       window.location.href = "/";
     }
-  }, [csrfToken]);
+  }, [csrfFetch]);
 
   return (
     <>
@@ -128,7 +152,7 @@ function ResetButton({ csrfToken }: { csrfToken: string }) {
           onClick={() => setOpen(false)}
         >
           <div
-            className="mx-4 w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-2xl"
+            className="mx-4 w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="mb-2 text-base font-semibold text-foreground">
@@ -145,14 +169,14 @@ function ResetButton({ csrfToken }: { csrfToken: string }) {
             <div className="flex justify-end gap-2">
               <button
                 onClick={() => setOpen(false)}
-                className="rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-accent"
+                className="rounded-xl px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-accent"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={handleReset}
-                className="rounded-lg bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground hover:opacity-90"
+                className="rounded-xl bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground shadow-sm hover:opacity-90"
               >
                 Reset
               </button>

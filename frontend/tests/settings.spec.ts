@@ -18,7 +18,7 @@ test.describe("settings", () => {
 
     await page.getByTitle("Settings").click();
 
-    await expect(page.getByText("Settings")).toBeVisible();
+    await expect(page.getByText("Settings", { exact: true })).toBeVisible();
     await expect(page.getByText("API Key")).toBeVisible();
   });
 
@@ -58,19 +58,19 @@ test.describe("settings", () => {
     await page.getByTitle("Settings").click();
 
     // Green "Set" badge appears next to the API Key label
-    await expect(page.getByText("Set")).toBeVisible();
+    await expect(page.getByText("Set", { exact: true })).toBeVisible();
   });
 
-  test("UF-27 shows Bedrock message when uses_bedrock is true", async ({ page }) => {
+  test("UF-27 hides API key section when uses_bedrock is true", async ({ page }) => {
     await setupApp(page, {
       settings: { uses_bedrock: true, has_api_key: false, base_url: null },
     });
 
     await page.getByTitle("Settings").click();
 
-    await expect(page.getByText(/AWS Bedrock/)).toBeVisible();
     // API key input is not shown in bedrock mode
     await expect(page.getByPlaceholder("sk-ant-…")).not.toBeVisible();
+    await expect(page.getByText("API Key")).not.toBeVisible();
   });
 
   test("UF-28 saving an API key shows success message", async ({ page }) => {
@@ -98,4 +98,27 @@ test.describe("settings", () => {
 
     await expect(page.getByText("Failed to save. Please try again.")).toBeVisible();
   });
+
+  test("UF-30 shows Base URL when configured and not in Bedrock mode", async ({ page }) => {
+    await setupApp(page, {
+      settings: { uses_bedrock: false, has_api_key: false, base_url: "https://api.example.com" },
+    });
+
+    await page.getByTitle("Settings").click();
+
+    await expect(page.getByText("Base URL:")).toBeVisible();
+    await expect(page.getByText("https://api.example.com")).toBeVisible();
+  });
+
+  test("UF-31 hides Base URL in Bedrock mode even when base_url is set", async ({ page }) => {
+    await setupApp(page, {
+      settings: { uses_bedrock: true, has_api_key: false, base_url: "http://54.167.41.65:3000" },
+    });
+
+    await page.getByTitle("Settings").click();
+
+    await expect(page.getByText("API Key")).not.toBeVisible();
+    await expect(page.getByText("Base URL:")).not.toBeVisible();
+  });
+
 });

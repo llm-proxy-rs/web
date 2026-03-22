@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { FileText } from "lucide-react";
 
 interface ToolDiffViewerProps {
@@ -22,7 +22,10 @@ export default function ToolDiffViewer({
   filePath,
   badge,
 }: ToolDiffViewerProps) {
-  const diffLines = computeDiffLines(oldContent, newContent);
+  const diffLines = useMemo(
+    () => computeDiffLines(oldContent, newContent),
+    [oldContent, newContent],
+  );
   const truncated =
     oldContent.split("\n").length > MAX_DIFF_LINES ||
     newContent.split("\n").length > MAX_DIFF_LINES;
@@ -31,22 +34,22 @@ export default function ToolDiffViewer({
     <div className="overflow-hidden rounded-b-lg">
       <div className="flex items-center gap-2 border-t border-border bg-muted/30 px-3 py-1.5">
         <FileText className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
-        <span className="flex-1 truncate font-mono text-[11px] text-muted-foreground">
+        <span className="flex-1 truncate font-mono text-xs text-muted-foreground">
           {filePath}
         </span>
         <span
-          className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${BADGE_STYLES[badge]}`}
+          className={`rounded px-1.5 py-0.5 text-xs font-medium ${BADGE_STYLES[badge]}`}
         >
           {badge}
         </span>
       </div>
       {truncated && (
-        <div className="border-t border-border bg-yellow-500/10 px-3 py-1 text-[11px] text-yellow-400">
+        <div className="border-t border-border bg-yellow-500/10 px-3 py-1 text-xs text-yellow-400">
           Diff truncated — inputs exceed {MAX_DIFF_LINES} lines
         </div>
       )}
       <div className="overflow-x-auto">
-        <table className="w-full border-collapse font-mono text-xs">
+        <table className="w-full border-collapse font-mono text-sm">
           <tbody>
             {diffLines.map((line, i) => (
               <DiffLine key={i} line={line} />

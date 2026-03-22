@@ -1,6 +1,6 @@
 /**
- * UF-18  Empty directory     — Terminal tab files panel shows "Empty directory" when no entries
- * UF-19  File listing        — Terminal tab files panel lists file names and formatted sizes
+ * UF-18  Empty directory     — Files panel shows "Empty directory" when no entries
+ * UF-19  File listing        — Files panel lists file names and formatted sizes
  * UF-20  Navigate into dir   — clicking a directory loads its contents
  * UF-21  Breadcrumb nav      — clicking Home in breadcrumb returns to root
  * UF-22  File upload         — selecting a file shows "Uploading…" then "Uploaded."
@@ -8,11 +8,16 @@
 import { test, expect } from "@playwright/test";
 import { setupApp } from "./helpers/setup";
 
+/** Open the Files panel via the IconRail Files button. */
+async function openFiles(page: import("@playwright/test").Page) {
+  await page.getByTitle("Files").click();
+}
+
 test.describe("files", () => {
   test("UF-18 empty directory shows empty state", async ({ page }) => {
     await setupApp(page, { files: { "/tmp": [] } });
 
-    await page.getByTitle("Terminal").click();
+    await openFiles(page);
 
     await expect(page.getByText("Empty directory")).toBeVisible();
   });
@@ -28,7 +33,7 @@ test.describe("files", () => {
       },
     });
 
-    await page.getByTitle("Terminal").click();
+    await openFiles(page);
 
     await expect(page.getByText("report.txt")).toBeVisible();
     await expect(page.getByText("2.0 KB")).toBeVisible();
@@ -46,7 +51,7 @@ test.describe("files", () => {
       },
     });
 
-    await page.getByTitle("Terminal").click();
+    await openFiles(page);
 
     // Click the "docs" folder
     await page.getByText("docs").click();
@@ -65,7 +70,7 @@ test.describe("files", () => {
       },
     });
 
-    await page.getByTitle("Terminal").click();
+    await openFiles(page);
 
     // Navigate into the logs directory
     await page.getByText("logs").click();
@@ -81,12 +86,12 @@ test.describe("files", () => {
   test("UF-22 uploading a file shows status and then clears", async ({ page }) => {
     await setupApp(page, { files: { "/tmp": [] } });
 
-    await page.getByTitle("Terminal").click();
+    await openFiles(page);
     // Wait for the FileManager to finish its initial directory load
     await expect(page.getByText("Empty directory")).toBeVisible();
 
     // Set files directly on the hidden input — avoids relying on the OS file chooser dialog
-    await page.locator('input[type="file"]').setInputFiles({
+    await page.locator('input[type="file"]').last().setInputFiles({
       name: "test.txt",
       mimeType: "text/plain",
       buffer: Buffer.from("hello"),

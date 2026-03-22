@@ -106,10 +106,8 @@ async fn send_sse(tx: &mpsc::Sender<Bytes>, data: Bytes) -> bool {
 
 fn build_sse_error_event(e: anyhow::Error) -> Bytes {
     let payload = serde_json::json!({ "message": e.to_string() });
-    Bytes::from(format!(
-        "event: error_event\ndata: {}\n\n",
-        serde_json::to_string(&payload).unwrap_or_default()
-    ))
+    let serialized = serde_json::to_string(&payload).unwrap_or_else(|_| payload.to_string());
+    Bytes::from(format!("event: error_event\ndata: {serialized}\n\n"))
 }
 
 async fn stream_ssh_channel(

@@ -1,5 +1,5 @@
 import React, { useCallback, useRef, useState } from "react";
-import type { ChatMessage, PendingQuestion } from "../types";
+import type { ChatMessage, PendingQuestion, StreamPhaseInfo } from "../types";
 
 function generateId(): string {
   return crypto.randomUUID();
@@ -22,6 +22,11 @@ export interface ChatStateResult {
   ) => void;
   getTaskId: (conversationId: string | null) => string | undefined;
   setTaskId: (conversationId: string | null, clientId: string) => void;
+  getStreamPhase: (conversationId: string | null) => StreamPhaseInfo;
+  setStreamPhase: (
+    conversationId: string | null,
+    info: StreamPhaseInfo,
+  ) => void;
   getMessages: (conversationId: string | null) => ChatMessage[];
   setMessages: (conversationId: string | null, msgs: ChatMessage[]) => void;
   addMessage: (conversationId: string | null, msg: ChatMessage) => void;
@@ -46,6 +51,7 @@ export function useChatState(): ChatStateResult {
     new Map(),
   );
   const taskIdBySession = useRef<Map<string, string>>(new Map());
+  const streamPhaseBySession = useRef<Map<string, StreamPhaseInfo>>(new Map());
   const [viewConversationId, setViewConversationId] = useState<string | null>(
     null,
   );
@@ -83,6 +89,25 @@ export function useChatState(): ChatStateResult {
     (conversationId: string | null, clientId: string) => {
       if (conversationId === null) return;
       taskIdBySession.current.set(conversationId, clientId);
+    },
+    [],
+  );
+
+  const getStreamPhase = useCallback(
+    (conversationId: string | null): StreamPhaseInfo => {
+      if (conversationId === null) return { phase: "idle" };
+      return (
+        streamPhaseBySession.current.get(conversationId) ?? { phase: "idle" }
+      );
+    },
+    [],
+  );
+
+  const setStreamPhase = useCallback(
+    (conversationId: string | null, info: StreamPhaseInfo) => {
+      if (conversationId === null) return;
+      streamPhaseBySession.current.set(conversationId, info);
+      setRenderTick((t) => t + 1);
     },
     [],
   );
@@ -191,6 +216,8 @@ export function useChatState(): ChatStateResult {
     setSessionPendingQuestion,
     getTaskId,
     setTaskId,
+    getStreamPhase,
+    setStreamPhase,
     getMessages,
     setMessages,
     addMessage,

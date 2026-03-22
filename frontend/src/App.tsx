@@ -1,12 +1,13 @@
 import React, { useCallback, useState } from "react";
-import { FolderOpen } from "lucide-react";
 import { SseProvider, useSse } from "./contexts/SseContext";
 import IconRail from "./components/IconRail";
 import Sidebar from "./components/Sidebar";
 import ChatInterface from "./components/ChatInterface";
 import Terminal from "./components/Terminal";
 import FileManager from "./components/FileManager";
+import MobileNav from "./components/MobileNav";
 import SettingsPanel from "./components/SettingsPanel";
+import { useUiPreferences } from "./hooks/useUiPreferences";
 import type { Conversation, ViewTab } from "./types";
 
 class ErrorBoundary extends React.Component<
@@ -27,8 +28,8 @@ class ErrorBoundary extends React.Component<
       return (
         <div className="flex h-screen w-screen items-center justify-center bg-background text-foreground">
           <div className="max-w-md space-y-2 p-6 text-center">
-            <p className="text-sm font-medium">Something went wrong</p>
-            <p className="font-mono text-xs text-muted-foreground">
+            <p className="text-base font-medium">Something went wrong</p>
+            <p className="font-mono text-sm text-muted-foreground">
               {this.state.error.message}
             </p>
           </div>
@@ -41,8 +42,9 @@ class ErrorBoundary extends React.Component<
 
 function AppContent() {
   const {
+    vmReady,
     hasUserRootfs,
-    csrfToken,
+    csrfFetch,
     conversations,
     createConversation,
     deleteConversation,
@@ -57,7 +59,9 @@ function AppContent() {
   >(new Set());
   const [newChatKey, setNewChatKey] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
-  const [showFiles, setShowFiles] = useState(true);
+  const { preferences, setPreference } = useUiPreferences();
+  const [showFilesPanel, setShowFilesPanel] = useState(false);
+  const [showMobileSidebar, setShowMobileSidebar] = useState(false);
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     const saved = localStorage.getItem("ui-theme");
     return saved ? saved === "dark" : true;
@@ -105,59 +109,109 @@ function AppContent() {
         activeTab={activeTab}
         onTabChange={setActiveTab}
         hasUserRootfs={hasUserRootfs}
-        csrfToken={csrfToken}
+        csrfFetch={csrfFetch}
         onSettingsOpen={() => setShowSettings(true)}
+        onFilesOpen={() => setShowFilesPanel(true)}
         darkMode={darkMode}
         onToggleDarkMode={toggleDarkMode}
       />
 
-      {activeTab === "chat" && (
-        <Sidebar
-          conversations={conversations}
-          viewConversationId={selectedConversation?.conversationId ?? null}
-          runningConversationIds={runningConversationIds}
-          onSelectConversation={setSelectedConversation}
-          onNewChat={handleNewChat}
-          onDeleteConversation={handleDeleteConversation}
-          onRefresh={() => {
-            syncConversationsFromHistory().catch(console.error);
-          }}
+      {!vmReady ? (
+        <div className="flex flex-1 items-center justify-center">
+          <div className="flex flex-col items-center gap-3 text-muted-foreground">
+            <svg
+              className="h-6 w-6 animate-spin"
+              viewBox="0 0 24 24"
+              fill="none"
+            >
+              <circle
+                className="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                strokeWidth="4"
+              />
+              <path
+                className="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+              />
+            </svg>
+            <span className="text-sm">Starting environment…</span>
+          </div>
+        </div>
+      ) : (
+        <>
+          {activeTab === "chat" && (
+            <Sidebar
+              conversations={conversations}
+              viewConversationId={selectedConversation?.conversationId ?? null}
+              runningConversationIds={runningConversationIds}
+              onSelectConversation={(conv) => {
+                setSelectedConversation(conv);
+                setShowMobileSidebar(false);
+              }}
+              onNewChat={handleNewChat}
+              onDeleteConversation={handleDeleteConversation}
+              onRefresh={() => {
+                syncConversationsFromHistory().catch(console.error);
+              }}
+              mobileOpen={showMobileSidebar}
+              onMobileClose={() => setShowMobileSidebar(false)}
+            />
+          )}
+
+          <main className="flex min-w-0 flex-1 flex-col overflow-hidden pb-14 md:pb-0">
+            {activeTab === "chat" && (
+              <ChatInterface
+                selectedConversation={selectedConversation}
+                newChatKey={newChatKey}
+                onRunningConversationChange={setRunningConversationIds}
+                onConversationCreated={setSelectedConversation}
+                preferences={preferences}
+              />
+            )}
+            <div
+              style={{ display: activeTab === "terminal" ? "flex" : "none" }}
+              className="min-h-0 flex-1"
+            >
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                <Terminal visible={activeTab === "terminal"} />
+              </div>
+            </div>
+          </main>
+        </>
+      )}
+
+      {showSettings && (
+        <SettingsPanel
+          onClose={() => setShowSettings(false)}
+          preferences={preferences}
+          onTogglePreference={setPreference}
         />
       )}
 
-      <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        {activeTab === "chat" && (
-          <ChatInterface
-            selectedConversation={selectedConversation}
-            newChatKey={newChatKey}
-            onRunningConversationChange={setRunningConversationIds}
-            onConversationCreated={setSelectedConversation}
-          />
-        )}
+      {showFilesPanel && (
         <div
-          style={{ display: activeTab === "terminal" ? "flex" : "none" }}
-          className="min-h-0 flex-1"
+          className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-sm"
+          onClick={() => setShowFilesPanel(false)}
         >
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-            <Terminal visible={activeTab === "terminal"} />
+          <div
+            className="flex h-full w-full max-w-sm flex-col border-l border-border bg-card shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <FileManager onClose={() => setShowFilesPanel(false)} />
           </div>
-          {showFiles ? (
-            <div className="flex min-h-0 w-80 flex-col border-l border-border/40">
-              <FileManager onClose={() => setShowFiles(false)} />
-            </div>
-          ) : (
-            <button
-              title="Show files"
-              onClick={() => setShowFiles(true)}
-              className="flex w-8 flex-col items-center justify-center border-l border-border/40 bg-card text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              <FolderOpen className="h-4 w-4" />
-            </button>
-          )}
         </div>
-      </main>
+      )}
 
-      {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
+      <MobileNav
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        onToggleSidebar={() => setShowMobileSidebar((v) => !v)}
+        onFilesOpen={() => setShowFilesPanel(true)}
+      />
     </div>
   );
 }

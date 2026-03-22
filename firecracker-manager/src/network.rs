@@ -31,8 +31,8 @@ pub(crate) fn format_tap_name(idx: u8) -> String {
     format!("tap{idx}")
 }
 
-pub(crate) fn format_tap_ip(idx: u8) -> Ipv4Network {
-    Ipv4Network::new(Ipv4Addr::new(172, 16, idx, 1), 30).expect("prefix 30 is valid")
+pub(crate) fn format_tap_ip(idx: u8) -> Result<Ipv4Network> {
+    Ipv4Network::new(Ipv4Addr::new(172, 16, idx, 1), 30).context("invalid network prefix")
 }
 
 pub(crate) fn format_guest_ip(idx: u8) -> Ipv4Addr {
@@ -43,14 +43,12 @@ pub(crate) fn format_guest_mac(idx: u8) -> MacAddr6 {
     MacAddr6::new(0x06, 0x00, 0xAC, 0x10, idx, 0x02)
 }
 
-pub async fn setup_host_networking(net_helper_path: &Path) {
+pub async fn setup_host_networking(net_helper_path: &Path) -> Result<()> {
     let Some(host_iface) = fetch_host_iface_name().await else {
         warn!("could not determine host interface, skipping NAT setup");
-        return;
+        return Ok(());
     };
-    run_nat_setup(net_helper_path, &host_iface)
-        .await
-        .unwrap_or_else(|e| warn!("{e}"));
+    run_nat_setup(net_helper_path, &host_iface).await
 }
 
 async fn run_nat_setup(net_helper_path: &Path, host_iface: &str) -> Result<()> {
@@ -104,15 +102,15 @@ mod tests {
     #[test]
     fn test_format_tap_ip_structure() {
         assert_eq!(
-            format_tap_ip(0),
+            format_tap_ip(0).unwrap(),
             Ipv4Network::new(Ipv4Addr::new(172, 16, 0, 1), 30).unwrap()
         );
         assert_eq!(
-            format_tap_ip(1),
+            format_tap_ip(1).unwrap(),
             Ipv4Network::new(Ipv4Addr::new(172, 16, 1, 1), 30).unwrap()
         );
         assert_eq!(
-            format_tap_ip(255),
+            format_tap_ip(255).unwrap(),
             Ipv4Network::new(Ipv4Addr::new(172, 16, 255, 1), 30).unwrap()
         );
     }
@@ -130,7 +128,7 @@ mod tests {
     fn test_tap_and_guest_ip_share_same_subnet_for_same_idx() {
         // For each idx, tap (.1) and guest (.2) are in the same /30 block.
         for idx in [0u8, 1, 128, 253] {
-            let tap_ip = format_tap_ip(idx);
+            let tap_ip = format_tap_ip(idx).unwrap();
             let guest_ip = format_guest_ip(idx);
             assert!(
                 tap_ip.contains(guest_ip),

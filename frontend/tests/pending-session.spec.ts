@@ -30,7 +30,7 @@ test.describe("pending-session", () => {
     await page.getByRole("button", { name: "New Chat" }).click();
 
     // Blank state shown (new chat view)
-    await expect(page.getByText("Start a new conversation")).toBeVisible();
+    await expect(page.getByText("Welcome back")).toBeVisible();
 
     // Title still in sidebar
     await expect(page.locator("span.truncate").filter({ hasText: "Hello Claude" })).toBeVisible();
@@ -61,7 +61,7 @@ test.describe("pending-session", () => {
 
     // Switch away via New Chat
     await page.getByRole("button", { name: "New Chat" }).click();
-    await expect(page.getByText("Start a new conversation")).toBeVisible();
+    await expect(page.getByText("Welcome back")).toBeVisible();
 
     // Click the title row to navigate back
     await page.locator("span.truncate").filter({ hasText: "Hello Claude" }).click();

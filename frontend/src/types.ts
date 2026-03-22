@@ -168,12 +168,25 @@ export type SseEvent =
   | {
       type: "reconnecting";
       payload: { task_id: string; conversation_id: string };
-    };
+    }
+  | { type: "query_aborted"; conversationId: string };
 
 export interface FileEntry {
   name: string;
   is_dir: boolean;
   size: number;
+}
+
+export type StreamPhase =
+  | "idle"
+  | "processing"
+  | "thinking"
+  | "responding"
+  | "tool_use";
+
+export interface StreamPhaseInfo {
+  phase: StreamPhase;
+  toolName?: string;
 }
 
 export type ViewTab = "chat" | "terminal";

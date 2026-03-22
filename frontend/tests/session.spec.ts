@@ -130,4 +130,12 @@ test.describe("session", () => {
     // The imported session now appears in the sidebar
     await expect(page.locator("span.truncate").filter({ hasText: "Imported session" })).toBeVisible();
   });
+
+  test("ST-05 session with custom title displays it in sidebar", async ({ page }) => {
+    const conversation = makeConversation({ title: "fix-mobile-layout" });
+
+    await setupApp(page, { conversations: [conversation] });
+
+    await expect(page.locator("span.truncate").filter({ hasText: "fix-mobile-layout" })).toBeVisible();
+  });
 });

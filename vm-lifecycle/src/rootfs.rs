@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use common::copy_sparse;
 use std::{
     collections::HashMap,
@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 use tokio::{fs, sync::Mutex as AsyncMutex, time::timeout};
-use tracing::{error, info, warn};
+use tracing::info;
 use uuid::Uuid;
 
 use crate::{VmEntry, VmRegistry};
@@ -49,24 +49,21 @@ pub async fn save_all_vm_rootfs(
     vms: &VmRegistry,
     user_rootfs_dir: &Path,
     rootfs_lock: &AsyncMutex<()>,
-) {
+) -> Result<()> {
     let vm_entries: HashMap<String, VmEntry> = {
-        let Ok(mut registry) = vms.lock() else {
-            warn!("vm registry mutex poisoned");
-            return;
-        };
+        let mut registry = vms
+            .lock()
+            .map_err(|_| anyhow!("vm registry mutex poisoned"))?;
         registry.drain().collect()
     };
     if vm_entries.is_empty() {
-        return;
+        return Ok(());
     }
     info!(
         "saving rootfs for {} running vm(s) before shutdown",
         vm_entries.len()
     );
-    save_vm_rootfs_to_dir(&vm_entries, user_rootfs_dir, rootfs_lock)
-        .await
-        .unwrap_or_else(|e| error!("failed to save rootfs on shutdown: {e}"));
+    save_vm_rootfs_to_dir(&vm_entries, user_rootfs_dir, rootfs_lock).await
 }
 
 async fn save_vm_rootfs_to_dir(
@@ -87,7 +84,7 @@ async fn save_vm_rootfs_to_dir(
             .vm
             .save_rootfs(&rootfs_path)
             .await
-            .unwrap_or_else(|e| error!("failed to save rootfs on shutdown: {e}"));
+            .context("failed to save rootfs on shutdown")?;
     }
     Ok(())
 }

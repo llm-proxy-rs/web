@@ -14,6 +14,9 @@ from typing import Any
 
 SOCKET_PATH = "/tmp/agent.sock"
 QUESTION_TIMEOUT_SECS = 3600
+MCP_PROXY_PORT = 8443
+# Replaced by build_rootfs.py when --mcp-base-url is provided.
+MCP_SERVERS: dict = {}
 
 # Allowed root directories for work_dir. Populated at startup via _init_allowed_roots().
 _ALLOWED_WORK_DIR_ROOTS: list[str] = []
@@ -69,6 +72,7 @@ class Session:
     conversation_id: str
     pending_question: asyncio.Future | None = None
     pending_question_data: dict | None = None
+    cancelled: bool = False
 
 
 # All live sessions keyed by task_id (a server-generated UUID).
@@ -106,9 +110,15 @@ def emit_sse(event_name: str, data: dict) -> None:
     Falls back to the session's current writer when the original writer has
     closed (e.g. the client disconnected and reconnected mid-query).
     """
+    # Suppress events (except done/error) when the session has been cancelled
+    # to prevent buffered responses from reaching the client after stop.
+    task_id = _emit_session_id.get()
+    if task_id and event_name not in ("done", "error_event"):
+        session = _sessions.get(task_id)
+        if session and session.cancelled:
+            return
     writer = _emit_writer.get()
     if writer is None or writer.is_closing():
-        task_id = _emit_session_id.get()
         session = _sessions.get(task_id) if task_id else None
         writer = session.writer if session else None
     if writer is None or writer.is_closing():
@@ -158,23 +168,33 @@ def handle_answer_question(msg: dict) -> None:
     log(f"answer_question for unknown request_id {request_id!r}")
 
 
-def handle_interrupt(msg: dict, writer: asyncio.StreamWriter) -> None:
+def handle_interrupt(msg: dict) -> None:
     """Cancel the query task identified by task_id."""
     task_id = msg.get("task_id")
     if not task_id:
         return
     session = _sessions.get(task_id)
-    if session and not session.task.done() and session.writer is writer:
+    if session and not session.task.done():
         log(f"interrupt received for session {task_id!r}, cancelling")
+        session.cancelled = True
         session.task.cancel()
 
 
 def handle_query(msg: dict, writer: asyncio.StreamWriter) -> None:
     """Spawn a new run_query task and register it in _sessions."""
     sdk_session_id = msg.get("session_id")  # non-None when resuming
-    task_id = msg.get("task_id") or str(uuid.uuid4())
+    # Always generate task_id server-side to prevent client-supplied IDs
+    # from cancelling other sessions (DoS).
+    task_id = str(uuid.uuid4())
     conversation_id = msg.get("conversation_id", "")
     work_dir = resolve_work_dir(msg.get("work_dir"))
+    # Cancel any existing session with the same task_id to prevent orphaned tasks
+    existing = _sessions.get(task_id)
+    if existing and not existing.task.done():
+        log(f"duplicate task_id {task_id!r}, cancelling previous session")
+        existing.cancelled = True
+        existing.task.cancel()
+        _sessions.pop(task_id, None)
     token1 = _emit_writer.set(writer)
     token2 = _emit_session_id.set(task_id)
     task = asyncio.create_task(
@@ -215,7 +235,7 @@ async def route_connection(
         elif msg_type == "answer_question":
             handle_answer_question(msg)
         elif msg_type == "interrupt":
-            handle_interrupt(msg, writer)
+            handle_interrupt(msg)
         elif msg_type == "query":
             handle_query(msg, writer)
         else:
@@ -240,7 +260,11 @@ async def main():
         os.unlink(SOCKET_PATH)
     except FileNotFoundError:
         pass
-    server = await asyncio.start_unix_server(handle_connection, path=SOCKET_PATH)
+    old_umask = os.umask(0o177)  # Create socket with 0o600 permissions
+    server = await asyncio.start_unix_server(
+        handle_connection, path=SOCKET_PATH, limit=1_048_576  # 1 MB max line length
+    )
+    os.umask(old_umask)
     loop = asyncio.get_running_loop()
 
     def remove_socket():
@@ -287,6 +311,9 @@ async def run_query(
     captured_session_id = sdk_session_id
 
     async def handle_tool_permission(tool_name, input_, context):
+        # Allow all tools unconditionally. This is safe because the agent runs
+        # inside an isolated Firecracker microVM — the VM itself is the security
+        # boundary, so no additional tool-level filtering is needed here.
         log(f"can_use_tool called  tool_name={tool_name!r}")
         return PermissionResultAllow()
 
@@ -309,7 +336,15 @@ async def run_query(
         session.pending_question_data = question_data
         emit_sse("ask_user_question", question_data)
         log("PreToolUse AskUserQuestion: waiting for answer")
-        answers = await session.pending_question
+        try:
+            answers = await asyncio.wait_for(
+                session.pending_question, timeout=QUESTION_TIMEOUT_SECS
+            )
+        except asyncio.TimeoutError:
+            log("PreToolUse AskUserQuestion: timed out waiting for answer")
+            session.pending_question = None
+            session.pending_question_data = None
+            raise
         session.pending_question = None
         session.pending_question_data = None
         log("PreToolUse AskUserQuestion: answered")
@@ -322,7 +357,9 @@ async def run_query(
 
     options = ClaudeAgentOptions(
         cwd=work_dir,
+        setting_sources=["user"],
         can_use_tool=handle_tool_permission,
+        mcp_servers=MCP_SERVERS,
         hooks={
             "PreToolUse": [
                 HookMatcher(
@@ -358,7 +395,14 @@ async def run_query(
         log(f"query cancelled  task_id={task_id!r}")
     except Exception as exc:
         log(f"query error: {exc}")
-        emit_sse("error_event", {"message": str(exc)})
+        log(f"query error type: {type(exc).__name__}")
+        log(
+            f"query error attrs: {vars(exc) if hasattr(exc, '__dict__') else 'no __dict__'}"
+        )
+        for attr in ("stderr", "output", "returncode", "cmd", "exit_code"):
+            if hasattr(exc, attr):
+                log(f"query error {attr}: {getattr(exc, attr)!r}")
+        emit_sse("error_event", {"message": "An internal error occurred"})
     finally:
         log(f"query done  task_id={task_id!r}  session_id={captured_session_id!r}")
         emit_sse(

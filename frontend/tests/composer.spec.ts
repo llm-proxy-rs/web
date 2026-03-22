@@ -119,7 +119,7 @@ test.describe("composer", () => {
     await setupApp(page, {});
 
     // Click somewhere else first to lose focus
-    await page.getByText("Start a new conversation").click();
+    await page.getByText("Welcome back").click();
 
     // Click New Chat — selectedConversation stays null but newChatKey increments,
     // which must still trigger focus even without a selectedConversation state change
@@ -127,5 +127,46 @@ test.describe("composer", () => {
 
     const composer = page.getByPlaceholder("Message Claude…");
     await expect(composer).toBeFocused();
+  });
+
+  test("UF-62 composer has exactly one attach button", async ({ page }) => {
+    await setupApp(page, {});
+
+    // There should be exactly one attach button (Paperclip), not two
+    const attachButtons = page.locator('button[title="Attach file"]');
+    await expect(attachButtons).toHaveCount(1);
+
+    // No separate image button
+    await expect(page.locator('button[title="Attach image"]')).toHaveCount(0);
+  });
+
+  test("UF-63 attach button accepts all file types including images", async ({ page }) => {
+    await setupApp(page, {});
+
+    // The hidden file input should NOT have an accept filter — it takes all files
+    const fileInput = page.locator('input[type="file"]').first();
+    const accept = await fileInput.getAttribute("accept");
+    expect(accept).toBeNull();
+  });
+
+  test("UF-64 attaching an image shows thumbnail preview", async ({ page }) => {
+    await setupApp(page, {});
+
+    // Create a minimal 1x1 PNG
+    const pngBuffer = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==",
+      "base64",
+    );
+
+    await page.locator('input[type="file"]').first().setInputFiles({
+      name: "photo.png",
+      mimeType: "image/png",
+      buffer: pngBuffer,
+    });
+
+    // Thumbnail preview should appear (an <img> tag inside the chip)
+    await expect(page.locator('img[alt=""]')).toBeVisible();
+    // File name should be visible
+    await expect(page.getByText("photo.png")).toBeVisible();
   });
 });

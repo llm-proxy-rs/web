@@ -197,17 +197,17 @@ export default function AskUserQuestionPanel({
               <div className="absolute -right-0.5 -top-0.5 h-2 w-2 animate-pulse rounded-full bg-cyan-400" />
             </div>
             <div className="flex min-w-0 flex-1 items-center gap-2">
-              <span className="text-[10px] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
+              <span className="text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
                 Claude needs your input
               </span>
               {q.header && (
-                <span className="inline-flex items-center rounded border border-blue-100 bg-blue-50 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wider text-blue-600 dark:border-blue-800/50 dark:bg-blue-900/30 dark:text-blue-400">
+                <span className="inline-flex items-center rounded border border-blue-100 bg-blue-50 px-1.5 py-px text-xs font-semibold uppercase tracking-wider text-blue-600 dark:border-blue-800/50 dark:bg-blue-900/30 dark:text-blue-400">
                   {q.header}
                 </span>
               )}
             </div>
             {!isSingle && (
-              <span className="flex-shrink-0 text-[10px] tabular-nums text-gray-400 dark:text-gray-500">
+              <span className="flex-shrink-0 text-xs tabular-nums text-gray-400 dark:text-gray-500">
                 {currentStep + 1}/{total}
               </span>
             )}
@@ -232,11 +232,11 @@ export default function AskUserQuestionPanel({
             </div>
           )}
 
-          <p className="text-[14px] font-medium leading-snug text-gray-900 dark:text-gray-100">
+          <p className="text-sm font-medium leading-snug text-gray-900 dark:text-gray-100">
             {q.question}
           </p>
           {multi && (
-            <span className="text-[10px] text-gray-400 dark:text-gray-500">
+            <span className="text-xs text-gray-400 dark:text-gray-500">
               Select all that apply
             </span>
           )}
@@ -258,7 +258,7 @@ export default function AskUserQuestionPanel({
                   }`}
                 >
                   <kbd
-                    className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded font-mono text-[10px] transition-all duration-150 ${
+                    className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded font-mono text-xs transition-all duration-150 ${
                       isSelected
                         ? "bg-blue-500 font-semibold text-white"
                         : "border border-gray-200 bg-gray-100 text-gray-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-500"
@@ -268,13 +268,13 @@ export default function AskUserQuestionPanel({
                   </kbd>
                   <div className="min-w-0 flex-1">
                     <div
-                      className={`text-[13px] leading-tight ${isSelected ? "font-medium text-gray-900 dark:text-gray-100" : "text-gray-700 dark:text-gray-300"}`}
+                      className={`text-sm leading-tight ${isSelected ? "font-medium text-gray-900 dark:text-gray-100" : "text-gray-700 dark:text-gray-300"}`}
                     >
                       {opt.label}
                     </div>
                     {opt.description && (
                       <div
-                        className={`text-[11px] leading-snug ${isSelected ? "text-blue-600/70 dark:text-blue-300/70" : "text-gray-400 dark:text-gray-500"}`}
+                        className={`text-xs leading-snug ${isSelected ? "text-blue-600/70 dark:text-blue-300/70" : "text-gray-400 dark:text-gray-500"}`}
                       >
                         {opt.description}
                       </div>
@@ -309,7 +309,7 @@ export default function AskUserQuestionPanel({
               }`}
             >
               <kbd
-                className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded font-mono text-[10px] transition-all duration-150 ${
+                className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded font-mono text-xs transition-all duration-150 ${
                   isOtherOn
                     ? "bg-blue-500 font-semibold text-white"
                     : "border border-gray-200 bg-gray-100 text-gray-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-500"
@@ -318,7 +318,7 @@ export default function AskUserQuestionPanel({
                 0
               </kbd>
               <span
-                className={`text-[13px] leading-tight ${isOtherOn ? "font-medium text-gray-900 dark:text-gray-100" : "text-gray-500 dark:text-gray-400"}`}
+                className={`text-sm leading-tight ${isOtherOn ? "font-medium text-gray-900 dark:text-gray-100" : "text-gray-500 dark:text-gray-400"}`}
               >
                 Other...
               </span>
@@ -340,7 +340,7 @@ export default function AskUserQuestionPanel({
                     e.stopPropagation();
                   }}
                   placeholder="Type your answer..."
-                  className="w-full rounded-lg border-0 bg-gray-50 px-3 py-1.5 text-[13px] text-gray-900 outline-none ring-1 ring-gray-200 placeholder:text-gray-400 focus:ring-2 focus:ring-blue-400 dark:bg-gray-900/60 dark:text-gray-100 dark:ring-gray-700"
+                  className="w-full rounded-lg border-0 bg-gray-50 px-3 py-1.5 text-sm text-gray-900 outline-none ring-1 ring-gray-200 placeholder:text-gray-400 focus:ring-2 focus:ring-blue-400 dark:bg-gray-900/60 dark:text-gray-100 dark:ring-gray-700"
                 />
               </div>
             )}
@@ -351,10 +351,10 @@ export default function AskUserQuestionPanel({
           <button
             type="button"
             onClick={handleSkip}
-            className="text-[11px] text-gray-400 transition-colors hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+            className="text-xs text-gray-400 transition-colors hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
           >
             {isSingle ? "Skip" : "Skip all"}
-            <span className="ml-1 text-[9px] text-gray-300 dark:text-gray-600">
+            <span className="ml-1 text-xs text-gray-300 dark:text-gray-600">
               Esc
             </span>
           </button>
@@ -364,7 +364,7 @@ export default function AskUserQuestionPanel({
               <button
                 type="button"
                 onClick={() => setCurrentStep((s) => s - 1)}
-                className="inline-flex items-center gap-0.5 rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-gray-600 transition-all hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/60"
+                className="inline-flex items-center gap-0.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-gray-600 transition-all hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/60"
               >
                 Back
               </button>
@@ -373,10 +373,10 @@ export default function AskUserQuestionPanel({
               <button
                 type="button"
                 onClick={handleSubmit}
-                className="inline-flex items-center gap-1 rounded-lg bg-gradient-to-r from-blue-600 to-blue-500 px-3.5 py-1.5 text-[11px] font-semibold text-white shadow-sm transition-all hover:shadow-md"
+                className="inline-flex items-center gap-1 rounded-lg bg-gradient-to-r from-blue-600 to-blue-500 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm transition-all hover:shadow-md"
               >
                 Submit
-                <span className="ml-0.5 font-mono text-[9px] opacity-70">
+                <span className="ml-0.5 font-mono text-xs opacity-70">
                   Enter
                 </span>
               </button>
@@ -384,10 +384,10 @@ export default function AskUserQuestionPanel({
               <button
                 type="button"
                 onClick={() => setCurrentStep((s) => s + 1)}
-                className="inline-flex items-center gap-1 rounded-lg bg-gradient-to-r from-blue-600 to-blue-500 px-3.5 py-1.5 text-[11px] font-semibold text-white shadow-sm transition-all hover:shadow-md"
+                className="inline-flex items-center gap-1 rounded-lg bg-gradient-to-r from-blue-600 to-blue-500 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm transition-all hover:shadow-md"
               >
                 Next
-                <span className="ml-0.5 font-mono text-[9px] opacity-70">
+                <span className="ml-0.5 font-mono text-xs opacity-70">
                   Enter
                 </span>
               </button>

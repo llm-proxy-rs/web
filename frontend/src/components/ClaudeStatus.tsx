@@ -1,13 +1,5 @@
 import React, { useEffect, useState } from "react";
-
-const ACTION_WORDS = [
-  "Thinking",
-  "Processing",
-  "Analyzing",
-  "Working",
-  "Computing",
-  "Reasoning",
-];
+import type { StreamPhaseInfo } from "../types";
 
 function formatElapsedTime(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60);
@@ -16,13 +8,30 @@ function formatElapsedTime(totalSeconds: number): string {
   return `${minutes}m ${seconds}s`;
 }
 
+function phaseLabel(info: StreamPhaseInfo): string {
+  switch (info.phase) {
+    case "processing":
+      return "Processing";
+    case "thinking":
+      return "Thinking";
+    case "responding":
+      return "Responding";
+    case "tool_use":
+      return info.toolName ? `Using ${info.toolName}` : "Using tool";
+    default:
+      return "Processing";
+  }
+}
+
 interface ClaudeStatusProps {
   isLoading: boolean;
+  streamPhase: StreamPhaseInfo;
   onAbort?: () => void;
 }
 
 export default function ClaudeStatus({
   isLoading,
+  streamPhase,
   onAbort,
 }: ClaudeStatusProps) {
   const [elapsedTime, setElapsedTime] = useState(0);
@@ -41,15 +50,13 @@ export default function ClaudeStatus({
 
   if (!isLoading) return null;
 
-  const actionIndex = Math.floor(elapsedTime / 3) % ACTION_WORDS.length;
-  const statusText = ACTION_WORDS[actionIndex];
-  const elapsedLabel =
-    elapsedTime > 0 ? formatElapsedTime(elapsedTime) : "";
+  const statusText = phaseLabel(streamPhase);
+  const elapsedLabel = elapsedTime > 0 ? formatElapsedTime(elapsedTime) : "";
 
   return (
-    <div className="px-4 py-1.5">
+    <div className="px-4 py-2">
       <div
-        className="flex items-center gap-2"
+        className="flex items-center gap-2.5"
         role="status"
         aria-live="polite"
       >
@@ -58,10 +65,10 @@ export default function ClaudeStatus({
           <span className="thinking-dot h-1.5 w-1.5 rounded-full bg-primary/70" />
           <span className="thinking-dot h-1.5 w-1.5 rounded-full bg-primary/70" />
         </span>
-        <span className="text-xs text-muted-foreground">
-          Claude is {statusText.toLowerCase()}
+        <span className="text-sm font-medium text-muted-foreground">
+          {statusText}
           {elapsedLabel && (
-            <span className="ml-1.5 text-muted-foreground/50">
+            <span className="ml-1.5 tabular-nums font-normal text-muted-foreground/35">
               · {elapsedLabel}
             </span>
           )}

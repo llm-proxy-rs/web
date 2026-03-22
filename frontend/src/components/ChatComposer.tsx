@@ -1,58 +1,39 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Paperclip, Send, Square, X } from "lucide-react";
 import { useSse } from "../contexts/SseContext";
+import ModelChip from "./ModelChip";
 
 interface ChatComposerProps {
   isLoading: boolean;
   onSend: (text: string) => void;
   onStop: () => void;
   focusKey?: number;
+  droppedFiles?: File[];
 }
-
-interface SlashCommand {
-  name: string;
-  description: string;
-}
-
-const SLASH_COMMANDS: SlashCommand[] = [
-  { name: "/help", description: "Show help and available commands" },
-  { name: "/clear", description: "Clear conversation history" },
-  {
-    name: "/compact",
-    description: "Compact conversation with optional instructions",
-  },
-  { name: "/config", description: "Open config panel" },
-  { name: "/cost", description: "Show token usage and cost" },
-  { name: "/doctor", description: "Check Claude Code installation health" },
-  { name: "/init", description: "Initialize project with CLAUDE.md" },
-  { name: "/login", description: "Switch Anthropic accounts" },
-  { name: "/logout", description: "Log out" },
-  { name: "/memory", description: "Edit memory files" },
-  { name: "/mcp", description: "Manage MCP servers" },
-  { name: "/model", description: "Set or switch model" },
-  { name: "/pr_comments", description: "Get PR comments" },
-  { name: "/review", description: "Request code review" },
-  { name: "/status", description: "Show account / model status" },
-  { name: "/terminal", description: "Run shell command" },
-  { name: "/vim", description: "Enter vim mode" },
-];
 
 export default function ChatComposer({
   isLoading,
   onSend,
   onStop,
   focusKey,
+  droppedFiles,
 }: ChatComposerProps) {
-  const { uploadAction, csrfToken, uploadDir } = useSse();
+  const { uploadAction, uploadDir, csrfFetch } = useSse();
 
   const [input, setInput] = useState("");
-  const [slashMenuOpen, setSlashMenuOpen] = useState(false);
-  const [slashMenuIndex, setSlashMenuIndex] = useState(0);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [imageUrls, setImageUrls] = useState<Map<string, string>>(new Map());
+
+  // Clean up object URLs on unmount
+  useEffect(() => {
+    return () => {
+      imageUrls.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, []);
 
   // Focus the composer on mount and whenever focusKey changes (e.g. "New Chat" clicked)
   useEffect(() => {
@@ -82,23 +63,50 @@ export default function ChatComposer({
   const busy = isLoading || uploading;
   const blocked = busy;
 
-  const filteredCommands = input.startsWith("/")
-    ? SLASH_COMMANDS.filter((cmd) =>
-        cmd.name.startsWith(input.split(" ")[0].toLowerCase()),
-      )
-    : [];
+  const addFiles = useCallback((files: File[]) => {
+    if (files.length === 0) return;
+    setPendingFiles((prev) => [...prev, ...files]);
+    setImageUrls((prev) => {
+      const next = new Map(prev);
+      files.forEach((f) => {
+        if (f.type.startsWith("image/")) {
+          next.set(f.name + "-" + f.size, URL.createObjectURL(f));
+        }
+      });
+      return next;
+    });
+  }, []);
 
   const handleFileSelect = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const files = Array.from(e.target.files ?? []);
-      setPendingFiles((prev) => [...prev, ...files]);
+      addFiles(Array.from(e.target.files ?? []));
       e.target.value = "";
     },
-    [],
+    [addFiles],
   );
 
+  // Consume files dropped onto the parent drag zone
+  useEffect(() => {
+    if (droppedFiles && droppedFiles.length > 0) {
+      addFiles(droppedFiles);
+    }
+  }, [droppedFiles, addFiles]);
+
   const removeFile = useCallback((idx: number) => {
-    setPendingFiles((prev) => prev.filter((_, i) => i !== idx));
+    setPendingFiles((prev) => {
+      const file = prev[idx];
+      if (file && file.type.startsWith("image/")) {
+        const key = file.name + "-" + file.size;
+        setImageUrls((urls) => {
+          const next = new Map(urls);
+          const url = next.get(key);
+          if (url) URL.revokeObjectURL(url);
+          next.delete(key);
+          return next;
+        });
+      }
+      return prev.filter((_, i) => i !== idx);
+    });
   }, []);
 
   const handleSend = useCallback(async () => {
@@ -113,23 +121,16 @@ export default function ChatComposer({
       const uploadedPaths: string[] = [];
       for (const file of pendingFiles) {
         const formData = new FormData();
-        formData.append(
-          "path",
-          uploadDir.replace(/\/$/, "") + "/" + file.name.replace(/[/\\]/g, "_"),
-        );
         formData.append("file", file);
         try {
-          const res = await fetch(uploadAction, {
+          const res = await csrfFetch(uploadAction, {
             method: "POST",
-            headers: { "x-csrf-token": csrfToken },
             body: formData,
           });
-          if (res.ok)
-            uploadedPaths.push(
-              uploadDir.replace(/\/$/, "") +
-                "/" +
-                file.name.replace(/[/\\]/g, "_"),
-            );
+          if (res.ok) {
+            const data = await res.json();
+            if (data.path) uploadedPaths.push(data.path);
+          }
         } catch (err) {
           console.error("File upload failed", err);
         }
@@ -145,7 +146,6 @@ export default function ChatComposer({
     if (!finalText) return;
 
     setInput("");
-    setSlashMenuOpen(false);
     if (textareaRef.current) textareaRef.current.style.height = "auto";
     textareaRef.current?.focus();
     onSend(finalText);
@@ -155,124 +155,70 @@ export default function ChatComposer({
     uploading,
     pendingFiles,
     uploadAction,
-    csrfToken,
+    csrfFetch,
     uploadDir,
     onSend,
   ]);
 
-  const selectCommand = useCallback((cmd: SlashCommand) => {
-    setInput(cmd.name + " ");
-    setSlashMenuOpen(false);
-    setSlashMenuIndex(0);
-    textareaRef.current?.focus();
-  }, []);
-
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (slashMenuOpen && filteredCommands.length > 0) {
-        if (e.key === "ArrowDown") {
-          e.preventDefault();
-          setSlashMenuIndex((i) => (i + 1) % filteredCommands.length);
-          return;
-        }
-        if (e.key === "ArrowUp") {
-          e.preventDefault();
-          setSlashMenuIndex(
-            (i) => (i - 1 + filteredCommands.length) % filteredCommands.length,
-          );
-          return;
-        }
-        if (e.key === "Enter" || e.key === "Tab") {
-          e.preventDefault();
-          selectCommand(filteredCommands[slashMenuIndex]);
-          return;
-        }
-        if (e.key === "Escape") {
-          e.preventDefault();
-          setSlashMenuOpen(false);
-          return;
-        }
-      }
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         handleSend();
       }
     },
-    [
-      slashMenuOpen,
-      filteredCommands,
-      slashMenuIndex,
-      selectCommand,
-      handleSend,
-    ],
+    [handleSend],
   );
 
   const handleInput = useCallback((e: React.FormEvent<HTMLTextAreaElement>) => {
     const target = e.target as HTMLTextAreaElement;
     target.style.height = "auto";
     target.style.height = Math.min(target.scrollHeight, 260) + "px";
-    const value = target.value;
-    setInput(value);
-    setSlashMenuIndex(0);
-    setSlashMenuOpen(value.startsWith("/") && !value.includes(" "));
+    setInput(target.value);
   }, []);
 
-  const menuVisible = slashMenuOpen && filteredCommands.length > 0;
-
   return (
-    <div className="flex-shrink-0 border-t border-border bg-card/60 px-3 pb-3 pt-2">
+    <div className="flex-shrink-0 border-t border-border bg-card/70 px-3 pb-3 pt-2">
       <div className="mx-auto max-w-3xl">
         <div className="relative">
-          {/* Slash command menu */}
-          {menuVisible && (
-            <div className="absolute bottom-full left-0 right-0 mb-1.5 overflow-hidden rounded-xl border border-border bg-card shadow-xl">
-              {filteredCommands.map((cmd, i) => (
-                <button
-                  key={cmd.name}
-                  type="button"
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    selectCommand(cmd);
-                  }}
-                  className={`flex w-full items-baseline gap-3 px-3 py-2 text-left ${
-                    i === slashMenuIndex ? "bg-accent" : "hover:bg-accent/60"
-                  }`}
-                >
-                  <span className="font-mono text-xs font-medium text-foreground">
-                    {cmd.name}
-                  </span>
-                  <span className="truncate text-[11px] text-muted-foreground">
-                    {cmd.description}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-
           {/* Pending file chips */}
           {pendingFiles.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-1.5">
-              {pendingFiles.map((file, i) => (
-                <span
-                  key={file.name + "-" + i}
-                  className="flex items-center gap-1 rounded-full border border-border bg-muted px-2.5 py-0.5 text-xs text-foreground"
-                >
-                  <Paperclip className="h-2.5 w-2.5 text-muted-foreground" />
-                  <span className="max-w-[160px] truncate">{file.name}</span>
-                  <button
-                    type="button"
-                    onClick={() => removeFile(i)}
-                    className="ml-0.5 text-muted-foreground hover:text-foreground"
+              {pendingFiles.map((file, i) => {
+                const imgKey = file.name + "-" + file.size;
+                const thumbUrl = file.type.startsWith("image/")
+                  ? imageUrls.get(imgKey)
+                  : undefined;
+                return (
+                  <span
+                    key={file.name + "-" + i}
+                    className="flex items-center gap-1 rounded-full border border-border/60 bg-card px-2.5 py-1 text-sm text-foreground shadow-sm"
                   >
-                    <X className="h-2.5 w-2.5" />
-                  </button>
-                </span>
-              ))}
+                    {thumbUrl ? (
+                      <img
+                        src={thumbUrl}
+                        alt=""
+                        className="h-5 w-5 rounded object-cover"
+                      />
+                    ) : (
+                      <Paperclip className="h-2.5 w-2.5 text-muted-foreground" />
+                    )}
+                    <span className="max-w-[160px] truncate">{file.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeFile(i)}
+                      className="ml-0.5 text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="h-2.5 w-2.5" />
+                    </button>
+                  </span>
+                );
+              })}
             </div>
           )}
 
           {/* Input row */}
-          <div className="flex items-center gap-2 rounded-2xl border border-border bg-background px-3 py-2 shadow-sm focus-within:border-primary/40 focus-within:ring-1 focus-within:ring-primary/20">
+          <div className="flex items-center gap-2 rounded-2xl border border-border bg-card px-3 py-2 shadow-lg shadow-black/8 transition-shadow duration-250 focus-within:border-primary/25 focus-within:shadow-xl focus-within:shadow-primary/8 focus-within:ring-2 focus-within:ring-primary/10">
             {/* File upload button */}
             <button
               type="button"
@@ -299,9 +245,11 @@ export default function ChatComposer({
               placeholder="Message Claude…"
               disabled={blocked}
               rows={1}
-              className="max-h-[260px] min-h-[32px] flex-1 resize-none bg-transparent py-[5px] text-sm leading-snug text-foreground placeholder-muted-foreground/50 focus:outline-none disabled:opacity-60"
+              className="max-h-[260px] min-h-[32px] flex-1 resize-none bg-transparent py-[5px] text-base leading-snug text-foreground placeholder-muted-foreground/40 focus:outline-none disabled:opacity-60"
               style={{ height: "32px" }}
             />
+
+            <ModelChip />
 
             {uploading ? (
               <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-muted">
@@ -312,7 +260,7 @@ export default function ChatComposer({
                 type="button"
                 onClick={onStop}
                 title="Stop (Esc)"
-                className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-destructive text-destructive-foreground hover:opacity-90"
+                className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-destructive text-destructive-foreground shadow-sm hover:opacity-90"
               >
                 <Square className="h-3.5 w-3.5" />
               </button>
@@ -324,17 +272,13 @@ export default function ChatComposer({
                   blocked || (!input.trim() && pendingFiles.length === 0)
                 }
                 title="Send"
-                className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground hover:opacity-90 disabled:bg-muted disabled:text-muted-foreground"
+                className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-md shadow-primary/25 hover:shadow-lg hover:shadow-primary/35 disabled:bg-muted disabled:text-muted-foreground disabled:opacity-50 disabled:shadow-none"
               >
                 <Send className="h-3.5 w-3.5" />
               </button>
             )}
           </div>
         </div>
-
-        <p className="mt-1.5 text-center text-[10px] text-muted-foreground/40">
-          Enter to send · Shift+Enter for newline
-        </p>
       </div>
     </div>
   );

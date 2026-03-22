@@ -1,4 +1,5 @@
 import { useEffect, useRef, type MutableRefObject } from "react";
+import { safeJsonParse } from "../utils/safeJson";
 import type {
   ChatMessage,
   ChatSession,
@@ -31,8 +32,16 @@ interface SseHandlerDeps {
 }
 
 interface PersistScheduler {
-  schedule: (getMessages: () => ChatMessage[], taskId: string) => void;
-  forceFlush: (getMessages: () => ChatMessage[], taskId: string) => void;
+  schedule: (
+    getMessages: () => ChatMessage[],
+    taskId: string,
+    conversationId?: string,
+  ) => void;
+  forceFlush: (
+    getMessages: () => ChatMessage[],
+    taskId: string,
+    conversationId?: string,
+  ) => void;
   cancel: () => void;
 }
 
@@ -41,23 +50,36 @@ function createPersistScheduler(): PersistScheduler {
   let dirty = false;
   let pendingGetMessages: (() => ChatMessage[]) | null = null;
   let pendingTaskId: string | null = null;
+  let pendingConversationId: string | null = null;
 
   function writeToDisk() {
     if (!dirty || !pendingGetMessages || !pendingTaskId) return;
     dirty = false;
     const taskId = pendingTaskId;
+    const conversationId = pendingConversationId;
     const messages = pendingGetMessages();
     localStorage.setItem(
       `chat_messages_task_${taskId}`,
       JSON.stringify(messages),
     );
+    if (conversationId && messages.length > 0) {
+      localStorage.setItem(
+        `chat_messages_${conversationId}`,
+        JSON.stringify(messages),
+      );
+    }
     pendingId = null;
   }
 
-  function schedule(getMessages: () => ChatMessage[], taskId: string) {
+  function schedule(
+    getMessages: () => ChatMessage[],
+    taskId: string,
+    conversationId?: string,
+  ) {
     dirty = true;
     pendingGetMessages = getMessages;
     pendingTaskId = taskId;
+    if (conversationId) pendingConversationId = conversationId;
     if (pendingId !== null) return;
     if (typeof requestIdleCallback === "function") {
       pendingId = requestIdleCallback(writeToDisk) as unknown as number;
@@ -66,7 +88,11 @@ function createPersistScheduler(): PersistScheduler {
     }
   }
 
-  function forceFlush(getMessages: () => ChatMessage[], taskId: string) {
+  function forceFlush(
+    getMessages: () => ChatMessage[],
+    taskId: string,
+    conversationId?: string,
+  ) {
     if (pendingId !== null) {
       if (typeof cancelIdleCallback === "function") {
         cancelIdleCallback(pendingId);
@@ -78,6 +104,7 @@ function createPersistScheduler(): PersistScheduler {
     dirty = true;
     pendingGetMessages = getMessages;
     pendingTaskId = taskId;
+    if (conversationId) pendingConversationId = conversationId;
     writeToDisk();
   }
 
@@ -148,6 +175,7 @@ export function useSseHandlers(
     getMessages,
     setMessages,
     setViewConversationId,
+    setStreamPhase,
     generateId,
   } = chatState;
 
@@ -238,6 +266,7 @@ export function useSseHandlers(
           const id = generateId();
           ss.thinkingMsgId = id;
           ss.assistantMsgId = null;
+          setStreamPhase(session, { phase: "processing" });
           addMessage(session, {
             id,
             type: "assistant",
@@ -247,7 +276,11 @@ export function useSseHandlers(
           });
           if (ss.taskId) {
             const taskId = ss.taskId;
-            schedulerRef.current.schedule(() => getMessages(session), taskId);
+            schedulerRef.current.schedule(
+              () => getMessages(session),
+              taskId,
+              session,
+            );
           }
           break;
         }
@@ -255,6 +288,7 @@ export function useSseHandlers(
         case "thinking_delta": {
           if (!session || !ss) break;
           const { thinking } = event.payload;
+          setStreamPhase(session, { phase: "thinking" });
           if (ss.thinkingMsgId) {
             updateMessageById(session, ss.thinkingMsgId, (m) => ({
               ...m,
@@ -262,7 +296,11 @@ export function useSseHandlers(
             }));
             if (ss.taskId) {
               const taskId = ss.taskId;
-              schedulerRef.current.schedule(() => getMessages(session), taskId);
+              schedulerRef.current.schedule(
+                () => getMessages(session),
+                taskId,
+                session,
+              );
             }
           }
           break;
@@ -272,6 +310,7 @@ export function useSseHandlers(
           if (!session || !ss) break;
           const { text } = event.payload;
           sealThinking();
+          setStreamPhase(session, { phase: "responding" });
           if (!ss.assistantMsgId) {
             const id = generateId();
             ss.assistantMsgId = id;
@@ -289,7 +328,11 @@ export function useSseHandlers(
           }
           if (ss.taskId) {
             const taskId = ss.taskId;
-            schedulerRef.current.schedule(() => getMessages(session), taskId);
+            schedulerRef.current.schedule(
+              () => getMessages(session),
+              taskId,
+              session,
+            );
           }
           break;
         }
@@ -299,6 +342,7 @@ export function useSseHandlers(
           const { id: toolId, name, input } = event.payload;
           sealThinking();
           ss.assistantMsgId = null;
+          setStreamPhase(session, { phase: "tool_use", toolName: name });
           if (name === "AskUserQuestion") break;
           const msgId = generateId();
           ss.toolIdToMsgId.set(toolId, msgId);
@@ -314,7 +358,11 @@ export function useSseHandlers(
           });
           if (ss.taskId) {
             const taskId = ss.taskId;
-            schedulerRef.current.schedule(() => getMessages(session), taskId);
+            schedulerRef.current.schedule(
+              () => getMessages(session),
+              taskId,
+              session,
+            );
           }
           break;
         }
@@ -322,6 +370,7 @@ export function useSseHandlers(
         case "tool_result": {
           if (!session || !ss) break;
           const { tool_use_id, content, is_error } = event.payload;
+          setStreamPhase(session, { phase: "thinking" });
           const msgId = ss.toolIdToMsgId.get(tool_use_id);
           if (msgId) {
             updateMessageById(session, msgId, (m) => {
@@ -330,7 +379,11 @@ export function useSseHandlers(
             });
             if (ss.taskId) {
               const taskId = ss.taskId;
-              schedulerRef.current.schedule(() => getMessages(session), taskId);
+              schedulerRef.current.schedule(
+                () => getMessages(session),
+                taskId,
+                session,
+              );
             }
           }
           break;
@@ -370,6 +423,7 @@ export function useSseHandlers(
 
         case "done": {
           const { session_id, task_id, conversation_id } = event.payload;
+          setStreamPhase(conversation_id, { phase: "idle" });
           const doneState = getOrCreateStreamState(
             streamStateRef.current,
             conversation_id,
@@ -377,8 +431,17 @@ export function useSseHandlers(
           schedulerRef.current.forceFlush(
             () => getMessages(conversation_id),
             task_id,
+            conversation_id,
           );
           localStorage.removeItem(`chat_messages_task_${task_id}`);
+          // Persist messages by conversationId for restoration after remount
+          const msgs = getMessages(conversation_id);
+          if (msgs.length > 0) {
+            localStorage.setItem(
+              `chat_messages_${conversation_id}`,
+              JSON.stringify(msgs),
+            );
+          }
           doneState.taskId = null;
           removeRunningConversation(conversation_id);
           setSessionPendingQuestion(conversation_id, null);
@@ -424,11 +487,13 @@ export function useSseHandlers(
             schedulerRef.current.forceFlush(
               () => getMessages(session),
               ss.taskId,
+              session ?? undefined,
             );
             localStorage.removeItem(`chat_messages_task_${ss.taskId}`);
             ss.taskId = null;
           }
           if (session) {
+            setStreamPhase(session, { phase: "idle" });
             removeRunningConversation(session);
             setSessionPendingQuestion(session, null);
             streamStateRef.current.delete(session);
@@ -440,6 +505,14 @@ export function useSseHandlers(
             content: message,
             timestamp: Date.now(),
           });
+          break;
+        }
+
+        case "query_aborted": {
+          const abortedId = event.conversationId;
+          setStreamPhase(abortedId, { phase: "idle" });
+          removeRunningConversation(abortedId);
+          streamStateRef.current.delete(abortedId);
           break;
         }
 
@@ -461,10 +534,23 @@ export function useSseHandlers(
           );
           if (savedMessages) {
             try {
-              inProgressMessages = JSON.parse(savedMessages) as ChatMessage[];
+              inProgressMessages = safeJsonParse<ChatMessage[]>(savedMessages);
               setMessages(conversation_id, inProgressMessages);
             } catch {
               /* ignore parse errors */
+            }
+          }
+          if (inProgressMessages.length === 0) {
+            const convMessages = localStorage.getItem(
+              `chat_messages_${conversation_id}`,
+            );
+            if (convMessages) {
+              try {
+                inProgressMessages = safeJsonParse<ChatMessage[]>(convMessages);
+                setMessages(conversation_id, inProgressMessages);
+              } catch {
+                /* ignore parse errors */
+              }
             }
           }
 

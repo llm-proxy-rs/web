@@ -9,9 +9,11 @@ const GET_SETTINGS_CMD: &str = "cat ~/.claude/settings.json 2>/dev/null || echo 
 const SET_SETTINGS_CMD: &str = "mkdir -p ~/.claude && cat > ~/.claude/settings.json";
 const CHANNEL_SEND_TIMEOUT_SECS: u64 = 30;
 const CHANNEL_WAIT_TIMEOUT_SECS: u64 = 30;
+const MCP_PROXY_LOCAL_PORT: u16 = 8443;
 
 pub struct VmSettings {
     pub has_api_key: bool,
+    pub model: Option<String>,
 }
 
 pub fn build_api_key_settings_json(
@@ -20,7 +22,8 @@ pub fn build_api_key_settings_json(
     haiku_model: &str,
     sonnet_model: &str,
     opus_model: &str,
-) -> String {
+    enable_mcp: bool,
+) -> Result<String> {
     let mut env = serde_json::json!({
         "ANTHROPIC_AUTH_TOKEN": api_key,
         "ANTHROPIC_DEFAULT_HAIKU_MODEL": haiku_model,
@@ -31,12 +34,37 @@ pub fn build_api_key_settings_json(
     if let Some(url) = base_url {
         env["ANTHROPIC_BASE_URL"] = serde_json::Value::String(url.to_string());
     }
-    serde_json::json!({
+    let mut settings = serde_json::json!({
         "$schema": "https://json.schemastore.org/claude-code-settings.json",
         "env": env,
         "skipWebFetchPreflight": true,
-    })
-    .to_string()
+    });
+    if enable_mcp {
+        settings["mcpServers"] = serde_json::json!({
+            "gemini-websearch": {
+                "type": "http",
+                "url": format!("http://localhost:{MCP_PROXY_LOCAL_PORT}/mcp")
+            }
+        });
+    }
+    serde_json::to_string_pretty(&settings).context("settings serialization failed")
+}
+
+pub fn build_bedrock_settings_json(
+    haiku_model: &str,
+    sonnet_model: &str,
+    opus_model: &str,
+) -> Result<String> {
+    let settings = serde_json::json!({
+        "$schema": "https://json.schemastore.org/claude-code-settings.json",
+        "env": {
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": haiku_model,
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": sonnet_model,
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": opus_model,
+            "CLAUDE_CODE_USE_BEDROCK": "1",
+        },
+    });
+    serde_json::to_string_pretty(&settings).context("settings serialization failed")
 }
 
 pub async fn get_vm_settings(
@@ -45,6 +73,16 @@ pub async fn get_vm_settings(
     ssh_user: &str,
     vm_host_key_path: &Path,
 ) -> Result<VmSettings> {
+    let raw = get_vm_settings_raw(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
+    parse_vm_settings(raw.trim())
+}
+
+pub async fn get_vm_settings_raw(
+    guest_ip: Ipv4Addr,
+    ssh_key_path: &Path,
+    ssh_user: &str,
+    vm_host_key_path: &Path,
+) -> Result<String> {
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
     let mut channel = open_exec_channel(&mut ssh_handle, GET_SETTINGS_CMD).await?;
     let mut stdout = String::new();
@@ -63,18 +101,22 @@ pub async fn get_vm_settings(
             Err(_) => return Err(anyhow!("SSH channel read timed out")),
         }
     }
-    parse_vm_settings(stdout.trim())
+    Ok(stdout)
 }
 
 fn parse_vm_settings(stdout: &str) -> Result<VmSettings> {
     let settings: serde_json::Value =
         serde_json::from_str(stdout).context("failed to parse settings JSON")?;
+    let env = settings.get("env");
     Ok(VmSettings {
-        has_api_key: settings
-            .get("env")
+        has_api_key: env
             .and_then(|v| v.get("ANTHROPIC_AUTH_TOKEN"))
             .and_then(|v| v.as_str())
             .is_some_and(|s| !s.is_empty()),
+        model: settings
+            .get("model")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
     })
 }
 
