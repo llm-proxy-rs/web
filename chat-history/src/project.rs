@@ -13,8 +13,8 @@ pub(crate) async fn find_all_project_dirs(
     let top_entries: Vec<DirEntry> = sftp
         .read_dir(projects_base.to_str().context("path is not valid UTF-8")?)
         .await
-        .context("failed to read projects directory")?
-        .collect();
+        .map(|entries| entries.collect())
+        .unwrap_or_default(); // projects dir may not exist yet if Claude Code has never been run
     let mut project_dirs = Vec::new();
     for entry in top_entries {
         let name = entry.file_name();
