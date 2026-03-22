@@ -43,7 +43,7 @@ pub(crate) async fn csrf_middleware(session: Session, request: Request, next: Ne
 
 pub(crate) async fn get_csrf_token(session: &Session) -> Result<String> {
     let token = session
-        .get::<String>("csrf_token")
+        .remove::<String>("csrf_token")
         .await
         .context("failed to read csrf_token from session")?
         .unwrap_or_else(generate_token);

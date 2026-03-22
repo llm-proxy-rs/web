@@ -25,14 +25,20 @@ pub fn stream_task_sse(
     message: AgentMessage,
 ) -> impl Stream<Item = Bytes> + use<> {
     let (tx, rx) = mpsc::channel::<Bytes>(SSE_CHANNEL_CAPACITY);
-    tokio::spawn(run_task_stream(
-        guest_ip,
-        ssh_key_path,
-        ssh_user,
-        vm_host_key_path,
-        message,
-        tx,
-    ));
+    tokio::spawn(async move {
+        if let Err(e) = run_task_stream(
+            guest_ip,
+            ssh_key_path,
+            ssh_user,
+            vm_host_key_path,
+            message,
+            tx,
+        )
+        .await
+        {
+            error!("task stream failed: {e:#}");
+        }
+    });
     ReceiverStream::new(rx)
 }
 
@@ -43,7 +49,7 @@ async fn run_task_stream(
     vm_host_key_path: PathBuf,
     message: AgentMessage,
     tx: mpsc::Sender<Bytes>,
-) {
+) -> Result<()> {
     let mut heartbeat = interval(Duration::from_secs(HEARTBEAT_SECS));
     heartbeat.tick().await;
     // connect_ssh retries the TCP connection for up to 60s (VM SSH daemon may still be starting),
@@ -57,14 +63,14 @@ async fn run_task_stream(
             result = &mut connect_future => break result,
             _ = heartbeat.tick() => {
                 if !send_sse(&tx, Bytes::from_static(b": keep-alive\n\n")).await {
-                    return;
+                    return Ok(());
                 }
             }
         }
     };
     match connect_result {
         Err(e) => {
-            send_sse(&tx, build_sse_error_event(e)).await;
+            send_sse(&tx, build_sse_error_event(e)?).await;
         }
         Ok((ssh_handle, ssh_channel)) => {
             let line = match serde_json::to_string(&message) {
@@ -72,10 +78,10 @@ async fn run_task_stream(
                 Err(e) => {
                     send_sse(
                         &tx,
-                        build_sse_error_event(anyhow::anyhow!("failed to serialize message: {e}")),
+                        build_sse_error_event(anyhow::anyhow!("failed to serialize message: {e}"))?,
                     )
                     .await;
-                    return;
+                    return Ok(());
                 }
             };
             if let Err(e) = ssh_channel
@@ -83,14 +89,15 @@ async fn run_task_stream(
                 .await
                 .context("failed to write message to agent socket")
             {
-                send_sse(&tx, build_sse_error_event(e)).await;
-                return;
+                send_sse(&tx, build_sse_error_event(e)?).await;
+                return Ok(());
             }
             if let Err(e) = stream_ssh_channel(ssh_handle, ssh_channel, &tx).await {
-                send_sse(&tx, build_sse_error_event(e)).await;
+                send_sse(&tx, build_sse_error_event(e)?).await;
             }
         }
     }
+    Ok(())
 }
 
 async fn send_sse(tx: &mpsc::Sender<Bytes>, data: Bytes) -> bool {
@@ -104,10 +111,12 @@ async fn send_sse(tx: &mpsc::Sender<Bytes>, data: Bytes) -> bool {
     }
 }
 
-fn build_sse_error_event(e: anyhow::Error) -> Bytes {
+fn build_sse_error_event(e: anyhow::Error) -> Result<Bytes> {
     let payload = serde_json::json!({ "message": e.to_string() });
-    let serialized = serde_json::to_string(&payload).unwrap_or_else(|_| payload.to_string());
-    Bytes::from(format!("event: error_event\ndata: {serialized}\n\n"))
+    let serialized = serde_json::to_string(&payload)?;
+    Ok(Bytes::from(format!(
+        "event: error_event\ndata: {serialized}\n\n"
+    )))
 }
 
 async fn stream_ssh_channel(

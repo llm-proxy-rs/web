@@ -37,6 +37,9 @@ pub fn build_api_key_settings_json(
     let mut settings = serde_json::json!({
         "$schema": "https://json.schemastore.org/claude-code-settings.json",
         "env": env,
+        "permissions": {
+            "deny": ["WebSearch"]
+        },
         "skipWebFetchPreflight": true,
     });
     if enable_mcp {
@@ -54,8 +57,9 @@ pub fn build_bedrock_settings_json(
     haiku_model: &str,
     sonnet_model: &str,
     opus_model: &str,
+    enable_mcp: bool,
 ) -> Result<String> {
-    let settings = serde_json::json!({
+    let mut settings = serde_json::json!({
         "$schema": "https://json.schemastore.org/claude-code-settings.json",
         "env": {
             "ANTHROPIC_DEFAULT_HAIKU_MODEL": haiku_model,
@@ -64,6 +68,14 @@ pub fn build_bedrock_settings_json(
             "CLAUDE_CODE_USE_BEDROCK": "1",
         },
     });
+    if enable_mcp {
+        settings["mcpServers"] = serde_json::json!({
+            "gemini-websearch": {
+                "type": "http",
+                "url": format!("http://localhost:{MCP_PROXY_LOCAL_PORT}/mcp")
+            }
+        });
+    }
     serde_json::to_string_pretty(&settings).context("settings serialization failed")
 }
 

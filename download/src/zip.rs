@@ -87,6 +87,7 @@ async fn write_zip_entries(
                 }
                 continue;
             }
+            // No canonicalization needed: both paths share a consistent prefix from the traversal
             let relative = child_path
                 .strip_prefix(dir_path)
                 .unwrap_or(&child_path)

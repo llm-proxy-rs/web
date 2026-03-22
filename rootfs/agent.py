@@ -183,9 +183,7 @@ def handle_interrupt(msg: dict) -> None:
 def handle_query(msg: dict, writer: asyncio.StreamWriter) -> None:
     """Spawn a new run_query task and register it in _sessions."""
     sdk_session_id = msg.get("session_id")  # non-None when resuming
-    # Always generate task_id server-side to prevent client-supplied IDs
-    # from cancelling other sessions (DoS).
-    task_id = str(uuid.uuid4())
+    task_id = msg.get("task_id") or str(uuid.uuid4())
     conversation_id = msg.get("conversation_id", "")
     work_dir = resolve_work_dir(msg.get("work_dir"))
     # Cancel any existing session with the same task_id to prevent orphaned tasks

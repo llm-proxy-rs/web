@@ -6,7 +6,7 @@ use axum::{
 use handlers::{AppState as CognitoState, CallbackQuery, callback, login};
 use store::upsert_user;
 use tower_sessions::Session;
-use tracing::{error, warn};
+use tracing::error;
 
 use crate::{
     gateway_auth::{initiate_gateway_login, is_gateway_configured},
@@ -84,8 +84,8 @@ pub(crate) async fn get_callback_handler(
     if is_gateway_configured(&state.config) {
         match initiate_gateway_login(&session, &state.config).await {
             Ok(authorize_url) => return Ok(Redirect::to(&authorize_url).into_response()),
-            Err(e) => {
-                warn!("failed to initiate gateway login, continuing without: {e}");
+            Err(_) => {
+                return Err(anyhow::anyhow!("failed to initiate gateway login").into());
             }
         }
     }

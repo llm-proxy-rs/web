@@ -138,12 +138,16 @@ impl FromRequestParts<AppState> for UserVm {
                     .await
                     .map_err(IntoResponse::into_response)?;
                 // Write settings to the freshly provisioned VM
-                if write_initial_settings(parts, state, user_vm.guest_ip)
+                write_initial_settings(parts, state, user_vm.guest_ip)
                     .await
-                    .is_err()
-                {
-                    error!("failed to write initial settings");
-                }
+                    .map_err(|e| {
+                        error!("failed to write initial settings: {e:#}");
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "An internal error occurred",
+                        )
+                            .into_response()
+                    })?;
                 return Ok(user_vm);
             }
         };
@@ -164,11 +168,13 @@ async fn write_initial_settings(
     state: &AppState,
     guest_ip: Ipv4Addr,
 ) -> Result<()> {
-    let session = Session::from_request_parts(parts, state).await.ok();
-    let gateway_key = match &session {
-        Some(s) => s.get::<String>("gateway_api_key").await.ok().flatten(),
-        None => None,
-    };
+    let session = Session::from_request_parts(parts, state)
+        .await
+        .map_err(|_| anyhow!("failed to extract session"))?;
+    let gateway_key = session
+        .get::<String>("gateway_api_key")
+        .await
+        .context("failed to read gateway_api_key from session")?;
 
     let content = match gateway_key {
         Some(key) => chat_settings::build_api_key_settings_json(
@@ -228,6 +234,7 @@ async fn write_bedrock_settings(state: &AppState, guest_ip: Ipv4Addr) -> Result<
         &state.config.anthropic_default_haiku_model,
         &state.config.anthropic_default_sonnet_model,
         &state.config.anthropic_default_opus_model,
+        state.config.enable_mcp,
     )?;
     chat_settings::set_vm_settings(
         guest_ip,
@@ -307,8 +314,7 @@ pub(crate) async fn vm_status_handler(
     let gateway_key = session
         .get::<String>("gateway_api_key")
         .await
-        .ok()
-        .flatten();
+        .context("failed to read gateway_api_key from session")?;
 
     // Spawn provisioning in background
     let state_clone = state.clone();
@@ -326,7 +332,7 @@ pub(crate) async fn vm_status_handler(
                 }
             }
             Err(_) => {
-                error!("background vm provisioning failed for {user_id}");
+                error!("background vm provisioning failed");
             }
         }
     });
@@ -528,7 +534,7 @@ pub(crate) async fn get_chat_transcript_handler(
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
     validate_session_id(&query.session_id)?;
-    validate_project_dir(&query.project_dir, &state.config.ssh_user_home)?;
+    validate_within_dir(Path::new(&query.project_dir), &state.config.ssh_user_home)?;
     let history = fetch_chat_history(
         user_vm.guest_ip,
         &state.config.ssh_key_path,
@@ -553,7 +559,7 @@ pub(crate) async fn delete_chat_session_handler(
     Json(form): Json<DeleteChatSessionForm>,
 ) -> Result<Response, AppError> {
     validate_session_id(&form.session_id)?;
-    validate_project_dir(&form.project_dir, &state.config.ssh_user_home)?;
+    validate_within_dir(Path::new(&form.project_dir), &state.config.ssh_user_home)?;
     delete_chat_session(
         user_vm.guest_ip,
         &state.config.ssh_key_path,
@@ -652,17 +658,32 @@ fn validate_session_id(session_id: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Validates that a project_dir is an absolute path under the user's home directory.
-/// Prevents path traversal via crafted project directories.
-/// Uses Path::starts_with for component-aware matching (not string prefix).
-fn validate_project_dir(project_dir: &str, ssh_user_home: &Path) -> Result<(), AppError> {
-    let dir = Path::new(project_dir);
-    if !dir.is_absolute() || project_dir.contains("..") {
-        return Err(anyhow!("invalid project_dir").into());
-    }
-    if !dir.starts_with(ssh_user_home) {
-        return Err(anyhow!("project_dir is not under user home").into());
-    }
+async fn write_chat_file_via_sftp(
+    sftp: &SftpSession,
+    path: &Path,
+    reader: &mut (impl AsyncRead + Unpin),
+) -> Result<()> {
+    let path_str = path
+        .to_str()
+        .context("chat upload path is not valid UTF-8")?;
+    let mut file = timeout(
+        Duration::from_secs(SFTP_OP_TIMEOUT_SECS),
+        sftp.create(path_str),
+    )
+    .await
+    .context("sftp create timed out")?
+    .map_err(|_| anyhow!("sftp create failed"))?;
+    timeout(
+        Duration::from_secs(SFTP_OP_TIMEOUT_SECS),
+        tokio::io::copy(reader, &mut file),
+    )
+    .await
+    .context("sftp write timed out")?
+    .context("failed to write chat file via sftp")?;
+    timeout(Duration::from_secs(SFTP_OP_TIMEOUT_SECS), file.shutdown())
+        .await
+        .context("sftp shutdown timed out")?
+        .map_err(|_| anyhow!("sftp shutdown failed"))?;
     Ok(())
 }
 
@@ -709,39 +730,6 @@ mod tests {
         assert!(validate_session_id("abc\ndef").is_err());
     }
 
-    // --- validate_project_dir tests ---
-
-    #[test]
-    fn valid_project_dir() {
-        let home = PathBuf::from("/home/ubuntu");
-        assert!(validate_project_dir("/home/ubuntu/.claude/projects/foo", &home).is_ok());
-    }
-
-    #[test]
-    fn invalid_project_dir_relative() {
-        let home = PathBuf::from("/home/ubuntu");
-        assert!(validate_project_dir("relative/path", &home).is_err());
-    }
-
-    #[test]
-    fn invalid_project_dir_traversal() {
-        let home = PathBuf::from("/home/ubuntu");
-        assert!(validate_project_dir("/home/ubuntu/../etc", &home).is_err());
-    }
-
-    #[test]
-    fn invalid_project_dir_outside_home() {
-        let home = PathBuf::from("/home/ubuntu");
-        assert!(validate_project_dir("/etc/passwd", &home).is_err());
-    }
-
-    #[test]
-    fn invalid_project_dir_prefix_confusion() {
-        // /home/ubuntuevil should NOT pass when home is /home/ubuntu
-        let home = PathBuf::from("/home/ubuntu");
-        assert!(validate_project_dir("/home/ubuntuevil/project", &home).is_err());
-    }
-
     // --- build_chat_upload_path tests ---
 
     #[test]
@@ -778,33 +766,4 @@ mod tests {
         let parts: Vec<&str> = name.splitn(2, '_').collect();
         assert!(parts[0].parse::<u128>().is_ok());
     }
-}
-
-async fn write_chat_file_via_sftp(
-    sftp: &SftpSession,
-    path: &Path,
-    reader: &mut (impl AsyncRead + Unpin),
-) -> Result<()> {
-    let path_str = path
-        .to_str()
-        .context("chat upload path is not valid UTF-8")?;
-    let mut file = timeout(
-        Duration::from_secs(SFTP_OP_TIMEOUT_SECS),
-        sftp.create(path_str),
-    )
-    .await
-    .context("sftp create timed out")?
-    .map_err(|_| anyhow!("sftp create failed"))?;
-    timeout(
-        Duration::from_secs(SFTP_OP_TIMEOUT_SECS),
-        tokio::io::copy(reader, &mut file),
-    )
-    .await
-    .context("sftp write timed out")?
-    .context("failed to write chat file via sftp")?;
-    timeout(Duration::from_secs(SFTP_OP_TIMEOUT_SECS), file.shutdown())
-        .await
-        .context("sftp shutdown timed out")?
-        .map_err(|_| anyhow!("sftp shutdown failed"))?;
-    Ok(())
 }

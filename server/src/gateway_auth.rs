@@ -9,10 +9,20 @@ use axum::{
     extract::State,
     response::{IntoResponse, Response},
 };
-use chat_settings::{build_api_key_settings_json, set_vm_settings};
 use serde::Deserialize;
 use token::TokenRequestBuilder;
 use tower_sessions::Session;
+
+#[derive(Deserialize)]
+struct ApiKeyResponse {
+    api_key: String,
+}
+
+#[derive(Deserialize)]
+struct TokenResponse {
+    access_token: String,
+    id_token: Option<String>,
+}
 
 /// Builds the Pool B (gateway Cognito) authorize URL and stores a random `state`
 /// nonce in the session. The `identity_provider` hint triggers silent SSO so users
@@ -68,12 +78,6 @@ pub(crate) async fn exchange_gateway_code(
         .error_for_status()
         .context("gateway cognito token endpoint returned error")?;
 
-    #[derive(Deserialize)]
-    struct TokenResponse {
-        access_token: String,
-        id_token: Option<String>,
-    }
-
     let token_resp: TokenResponse = resp
         .json()
         .await
@@ -106,11 +110,6 @@ pub(crate) async fn provision_gateway_api_key(
         anyhow::bail!("gateway api-keys endpoint returned {status}");
     }
 
-    #[derive(Deserialize)]
-    struct ApiKeyResponse {
-        api_key: String,
-    }
-
     let key_resp: ApiKeyResponse = resp
         .json()
         .await
@@ -126,47 +125,12 @@ pub(crate) fn is_gateway_configured(config: &AppConfig) -> bool {
         && !config.gateway_identity_provider.is_empty()
 }
 
-/// Provisions a new gateway API key and writes settings to the VM.
-async fn provision_and_write_settings(
-    access_token: &str,
-    config: &AppConfig,
-    user_vm: &UserVm,
-) -> Result<String> {
-    let api_key = provision_gateway_api_key(access_token, &config.gateway_api_url).await?;
-    let content = build_api_key_settings_json(
-        &api_key,
-        config.anthropic_base_url.as_deref(),
-        &config.anthropic_default_haiku_model,
-        &config.anthropic_default_sonnet_model,
-        &config.anthropic_default_opus_model,
-        config.enable_mcp,
-    )?;
-    set_vm_settings(
-        user_vm.guest_ip,
-        &config.ssh_key_path,
-        &config.ssh_user,
-        &config.vm_host_key_path,
-        &content,
-    )
-    .await?;
-    Ok(api_key)
-}
-
-/// Stores the gateway API key in the session.
-async fn store_key_in_session(session: &Session, api_key: &str) -> Result<()> {
-    session
-        .insert("gateway_api_key", api_key)
-        .await
-        .map_err(|e| anyhow::anyhow!("failed to store gateway_api_key in session: {e}"))
-}
-
 /// POST /api/renew-gateway-key
 ///
-/// Renews the user's gateway API key. If a gateway access token is stored in
-/// session, reuse it to provision a new key. Otherwise, redirect through the
-/// gateway OAuth flow.
+/// Renews the user's gateway API key by always redirecting through the gateway
+/// OAuth flow to obtain a fresh access token.
 pub(crate) async fn renew_gateway_key_handler(
-    user_vm: UserVm,
+    _user_vm: UserVm, // extractor runs FromRequestParts to verify the user has a live VM
     session: Session,
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
@@ -178,23 +142,8 @@ pub(crate) async fn renew_gateway_key_handler(
             .into_response());
     }
 
-    let access_token = session
-        .get::<String>("gateway_access_token")
-        .await
-        .ok()
-        .flatten();
-
-    match access_token {
-        Some(token) => {
-            let api_key = provision_and_write_settings(&token, &state.config, &user_vm).await?;
-            store_key_in_session(&session, &api_key).await?;
-            Ok(Json(serde_json::json!({"status": "ok"})).into_response())
-        }
-        None => {
-            let authorize_url = initiate_gateway_login(&session, &state.config).await?;
-            Ok(Json(serde_json::json!({"redirect": authorize_url})).into_response())
-        }
-    }
+    let authorize_url = initiate_gateway_login(&session, &state.config).await?;
+    Ok(Json(serde_json::json!({"redirect": authorize_url})).into_response())
 }
 
 #[cfg(test)]

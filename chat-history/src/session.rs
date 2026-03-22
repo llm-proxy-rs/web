@@ -2,13 +2,11 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use futures::future::BoxFuture;
 use russh_sftp::client::{SftpSession, fs::DirEntry};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sftp_client::open_sftp_session;
 use ssh_client::connect_ssh;
 use std::{net::Ipv4Addr, path::Path};
 use tokio::io::AsyncReadExt;
-
-use serde::Deserialize;
 
 use crate::{
     Content,

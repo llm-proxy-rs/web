@@ -15,6 +15,7 @@ use ssh_client::{connect_ssh, open_terminal_channel};
 use std::{net::Ipv4Addr, time::Duration};
 use tokio::time::timeout;
 use tracing::{error, info, warn};
+use url::Url;
 use uuid::Uuid;
 use vm_lifecycle::{VmEntry, build_user_rootfs_path};
 
@@ -39,19 +40,19 @@ pub(crate) async fn handle_ws_upgrade(
     // Validate Origin header to prevent cross-site WebSocket hijacking.
     // Browsers always send Origin on WebSocket upgrades; reject if it
     // doesn't match the Host header.
-    if let Some(origin) = headers.get("origin").and_then(|v| v.to_str().ok()) {
-        let origin_host = origin
-            .strip_prefix("https://")
-            .or_else(|| origin.strip_prefix("http://"))
-            .unwrap_or(origin);
-        if let Some(host) = headers.get("host").and_then(|v| v.to_str().ok()) {
-            // Compare just the hostname part (strip port from both sides)
-            let origin_name = origin_host.split(':').next().unwrap_or(origin_host);
-            let host_name = host.split(':').next().unwrap_or(host);
-            if origin_name != host_name {
-                warn!("ws origin mismatch: origin={origin_host} host={host}");
-                return Ok((StatusCode::FORBIDDEN, "Origin mismatch").into_response());
-            }
+    if let Some(origin) = headers.get("origin").and_then(|v| v.to_str().ok())
+        && let Ok(origin_url) = Url::parse(origin)
+        && let Some(host) = headers.get("host").and_then(|v| v.to_str().ok())
+    {
+        let Some(origin_name) = origin_url.host_str() else {
+            warn!("ws origin has no host");
+            return Ok((StatusCode::FORBIDDEN, "Origin mismatch").into_response());
+        };
+        // Host header is just hostname[:port], not a full URL
+        let host_name = host.split(':').next().unwrap_or(host);
+        if origin_name != host_name {
+            warn!("ws origin mismatch");
+            return Ok((StatusCode::FORBIDDEN, "Origin mismatch").into_response());
         }
     }
     Ok(ws.on_upgrade(move |socket| async move {
