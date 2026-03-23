@@ -50,8 +50,8 @@ async fn write_zip(
     let mut zip = ZipFileWriter::with_tokio(writer);
     let result = write_zip_entries(&sftp, &dir_path, &upload_dir, &mut zip).await;
     let _ = zip.close().await;
-    if let Err(e) = result {
-        tracing::warn!("zip write failed: {e}");
+    if result.is_err() {
+        tracing::warn!("zip write failed");
     }
 }
 

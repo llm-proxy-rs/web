@@ -140,8 +140,8 @@ impl FromRequestParts<AppState> for UserVm {
                 // Write settings to the freshly provisioned VM
                 write_initial_settings(parts, state, user_vm.guest_ip)
                     .await
-                    .map_err(|e| {
-                        error!("failed to write initial settings: {e:#}");
+                    .map_err(|_| {
+                        error!("failed to write initial settings");
                         (
                             StatusCode::INTERNAL_SERVER_ERROR,
                             "An internal error occurred",

@@ -47,7 +47,7 @@ pub(crate) async fn gateway_callback_handler(
     let pkce_verifier = session
         .remove::<String>("gateway_oauth_pkce_verifier")
         .await
-        .map_err(|e| anyhow::anyhow!("failed to retrieve PKCE verifier from session: {e}"))?
+        .map_err(|_| anyhow::anyhow!("failed to retrieve PKCE verifier from session"))?
         .context("PKCE verifier missing from session")?;
 
     // Remove stored nonce (validated implicitly via the token exchange)
@@ -65,15 +65,15 @@ pub(crate) async fn gateway_callback_handler(
     session
         .insert("gateway_access_token", &access_token)
         .await
-        .map_err(|e| anyhow::anyhow!("failed to store gateway_access_token in session: {e}"))?;
+        .map_err(|_| anyhow::anyhow!("failed to store gateway_access_token in session"))?;
     session
         .insert("gateway_api_key", &api_key)
         .await
-        .map_err(|e| anyhow::anyhow!("failed to store gateway_api_key in session: {e}"))?;
+        .map_err(|_| anyhow::anyhow!("failed to store gateway_api_key in session"))?;
     session
         .insert("gateway_key_provisioned", true)
         .await
-        .map_err(|e| anyhow::anyhow!("failed to store gateway_key_provisioned in session: {e}"))?;
+        .map_err(|_| anyhow::anyhow!("failed to store gateway_key_provisioned in session"))?;
 
     // Write key to VM
     let content = build_api_key_settings_json(

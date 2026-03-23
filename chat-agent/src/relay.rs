@@ -9,7 +9,7 @@ use tokio::{
     time::{Duration, interval, timeout},
 };
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::{AgentMessage, channel::connect_ssh_and_open_channel};
 
@@ -32,11 +32,11 @@ pub fn stream_task_sse(
             ssh_user,
             vm_host_key_path,
             message,
-            tx,
+            tx.clone(),
         )
         .await
         {
-            error!("task stream failed: {e:#}");
+            send_sse_error(&tx, e).await;
         }
     });
     ReceiverStream::new(rx)
@@ -70,17 +70,13 @@ async fn run_task_stream(
     };
     match connect_result {
         Err(e) => {
-            send_sse(&tx, build_sse_error_event(e)?).await;
+            send_sse_error(&tx, e).await;
         }
         Ok((ssh_handle, ssh_channel)) => {
             let line = match serde_json::to_string(&message) {
                 Ok(s) => format!("{s}\n"),
-                Err(e) => {
-                    send_sse(
-                        &tx,
-                        build_sse_error_event(anyhow::anyhow!("failed to serialize message: {e}"))?,
-                    )
-                    .await;
+                Err(_) => {
+                    send_sse_error(&tx, anyhow::anyhow!("failed to serialize message")).await;
                     return Ok(());
                 }
             };
@@ -89,15 +85,25 @@ async fn run_task_stream(
                 .await
                 .context("failed to write message to agent socket")
             {
-                send_sse(&tx, build_sse_error_event(e)?).await;
+                send_sse_error(&tx, e).await;
                 return Ok(());
             }
             if let Err(e) = stream_ssh_channel(ssh_handle, ssh_channel, &tx).await {
-                send_sse(&tx, build_sse_error_event(e)?).await;
+                send_sse_error(&tx, e).await;
             }
         }
     }
     Ok(())
+}
+
+async fn send_sse_error(tx: &mpsc::Sender<Bytes>, e: anyhow::Error) {
+    error!("task stream error");
+    match build_sse_error_event(e) {
+        Ok(event) => {
+            send_sse(tx, event).await;
+        }
+        Err(_) => warn!("failed to build sse error event"),
+    }
 }
 
 async fn send_sse(tx: &mpsc::Sender<Bytes>, data: Bytes) -> bool {

@@ -263,7 +263,7 @@ async fn shutdown_signal(
     let ctrl_c = async {
         signal::ctrl_c()
             .await
-            .unwrap_or_else(|e| tracing::error!("failed to install Ctrl+C handler: {e}"));
+            .unwrap_or_else(|_| tracing::error!("failed to install Ctrl+C handler"));
     };
     let terminate = async {
         let Ok(mut sig) = signal::unix::signal(signal::unix::SignalKind::terminate()) else {

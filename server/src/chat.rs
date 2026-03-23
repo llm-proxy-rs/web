@@ -62,7 +62,7 @@ pub(crate) async fn handle_chat_query(
     let task_created_json = serde_json::to_string(
         &serde_json::json!({"type": "task_created", "task_id": &task_id, "conversation_id": &conversation_id}),
     )
-    .map_err(|e| anyhow!("failed to serialize task_created event: {e}"))?;
+    .map_err(|_| anyhow!("failed to serialize task_created event"))?;
     let task_created_event = Bytes::from(format!(
         "event: task_created\ndata: {task_created_json}\n\n",
     ));
@@ -90,7 +90,7 @@ pub(crate) async fn handle_chat_query(
         .header(header::CACHE_CONTROL, "no-cache")
         .header("x-accel-buffering", "no")
         .body(body)
-        .map_err(|e| anyhow!("failed to build SSE response: {e}"))?;
+        .map_err(|_| anyhow!("failed to build SSE response"))?;
     Ok(response)
 }
 
@@ -129,7 +129,7 @@ pub(crate) async fn handle_chat_reconnect(
         .header(header::CACHE_CONTROL, "no-cache")
         .header("x-accel-buffering", "no")
         .body(body)
-        .map_err(|e| anyhow!("failed to build SSE response: {e}"))
+        .map_err(|_| anyhow!("failed to build SSE response"))
         .map_err(AppError::from)
 }
 
