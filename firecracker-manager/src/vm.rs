@@ -3,7 +3,7 @@ use common::copy_sparse;
 use firecracker_client::{start_instance, stop_instance};
 use nix::{
     sys::signal::{Signal, kill},
-    unistd::Pid,
+    unistd::{Gid, Pid, Uid},
 };
 use std::{
     collections::BTreeSet,
@@ -173,6 +173,12 @@ async fn launch_vm(
     prepare_jail_resources(chroot_dir, &vm_config.kernel_path).await?;
     info!("copying rootfs");
     copy_sparse(&vm_config.rootfs_path, &rootfs_copy).await?;
+    nix::unistd::chown(
+        &rootfs_copy,
+        Some(Uid::from_raw(vm_config.jailer.uid)),
+        Some(Gid::from_raw(vm_config.jailer.gid)),
+    )
+    .context("failed to chown rootfs copy for jailer")?;
     let child = spawn_firecracker_jailed(&vm_config.id, &vm_config.jailer)?;
     let pid = child
         .id()
