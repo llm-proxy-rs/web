@@ -157,3 +157,109 @@ async fn write_settings_file(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- parse_vm_settings ---
+
+    #[test]
+    fn parse_settings_with_api_key() {
+        let json = r#"{"env":{"ANTHROPIC_AUTH_TOKEN":"sk-test-123"}}"#;
+        let settings = parse_vm_settings(json).unwrap();
+        assert!(settings.has_api_key);
+        assert!(settings.model.is_none());
+    }
+
+    #[test]
+    fn parse_settings_without_api_key() {
+        let json = r#"{"env":{}}"#;
+        let settings = parse_vm_settings(json).unwrap();
+        assert!(!settings.has_api_key);
+    }
+
+    #[test]
+    fn parse_settings_empty_api_key() {
+        let json = r#"{"env":{"ANTHROPIC_AUTH_TOKEN":""}}"#;
+        let settings = parse_vm_settings(json).unwrap();
+        assert!(!settings.has_api_key);
+    }
+
+    #[test]
+    fn parse_settings_with_model() {
+        let json = r#"{"model":"claude-3-opus"}"#;
+        let settings = parse_vm_settings(json).unwrap();
+        assert_eq!(settings.model.as_deref(), Some("claude-3-opus"));
+    }
+
+    #[test]
+    fn parse_settings_no_env_key() {
+        let json = r#"{}"#;
+        let settings = parse_vm_settings(json).unwrap();
+        assert!(!settings.has_api_key);
+        assert!(settings.model.is_none());
+    }
+
+    #[test]
+    fn parse_settings_invalid_json() {
+        assert!(parse_vm_settings("not json").is_err());
+    }
+
+    // --- build_api_key_settings_json ---
+
+    #[test]
+    fn api_key_settings_contains_token() {
+        let json = build_api_key_settings_json("sk-abc", None, "haiku", "sonnet", "opus").unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["env"]["ANTHROPIC_AUTH_TOKEN"], "sk-abc");
+        assert_eq!(parsed["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "haiku");
+        assert_eq!(parsed["env"]["ANTHROPIC_DEFAULT_SONNET_MODEL"], "sonnet");
+        assert_eq!(parsed["env"]["ANTHROPIC_DEFAULT_OPUS_MODEL"], "opus");
+        assert!(parsed["env"].get("ANTHROPIC_BASE_URL").is_none());
+    }
+
+    #[test]
+    fn api_key_settings_with_base_url() {
+        let json = build_api_key_settings_json(
+            "sk-abc",
+            Some("https://custom.api"),
+            "haiku",
+            "sonnet",
+            "opus",
+        )
+        .unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["env"]["ANTHROPIC_BASE_URL"], "https://custom.api");
+    }
+
+    #[test]
+    fn api_key_settings_has_schema_and_permissions() {
+        let json = build_api_key_settings_json("sk-abc", None, "h", "s", "o").unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed["$schema"].is_string());
+        assert!(parsed["permissions"]["deny"].is_array());
+        assert_eq!(parsed["skipWebFetchPreflight"], true);
+    }
+
+    // --- build_bedrock_settings_json ---
+
+    #[test]
+    fn bedrock_settings_contains_models_and_bedrock_flag() {
+        let json = build_bedrock_settings_json("haiku-br", "sonnet-br", "opus-br").unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["env"]["CLAUDE_CODE_USE_BEDROCK"], "1");
+        assert_eq!(parsed["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "haiku-br");
+        assert_eq!(parsed["env"]["ANTHROPIC_DEFAULT_SONNET_MODEL"], "sonnet-br");
+        assert_eq!(parsed["env"]["ANTHROPIC_DEFAULT_OPUS_MODEL"], "opus-br");
+        // No API token should be present
+        assert!(parsed["env"].get("ANTHROPIC_AUTH_TOKEN").is_none());
+    }
+
+    #[test]
+    fn bedrock_settings_has_schema() {
+        let json = build_bedrock_settings_json("h", "s", "o").unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed["$schema"].is_string());
+    }
+}

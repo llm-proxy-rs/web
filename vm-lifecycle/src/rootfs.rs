@@ -88,3 +88,35 @@ async fn save_vm_rootfs_to_dir(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_user_rootfs_path_format() {
+        let user_id = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        let path = build_user_rootfs_path(Path::new("/data/rootfs"), user_id);
+        assert_eq!(
+            path,
+            PathBuf::from("/data/rootfs/550e8400-e29b-41d4-a716-446655440000.ext4")
+        );
+    }
+
+    #[test]
+    fn build_user_rootfs_path_different_dir() {
+        let user_id = Uuid::nil();
+        let path = build_user_rootfs_path(Path::new("/tmp"), user_id);
+        assert_eq!(
+            path,
+            PathBuf::from("/tmp/00000000-0000-0000-0000-000000000000.ext4")
+        );
+    }
+
+    #[test]
+    fn find_user_rootfs_returns_none_for_missing_file() {
+        let user_id = Uuid::parse_str("ffffffff-ffff-ffff-ffff-ffffffffffff").unwrap();
+        // /nonexistent won't contain this file
+        assert!(find_user_rootfs(Path::new("/nonexistent"), user_id).is_none());
+    }
+}

@@ -61,6 +61,40 @@ pub(crate) fn build_chroot_dir(chroot_base: &Path, vm_id: &str) -> PathBuf {
     chroot_base.join("firecracker").join(vm_id).join("root")
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn boot_args_includes_base_and_ip() {
+        let args = build_vm_boot_args("console=ttyS0", &Ipv4Addr::new(172, 16, 5, 2), 5);
+        assert!(args.starts_with("console=ttyS0 "));
+        assert!(
+            args.contains("ip=172.16.5.2::172.16.5.1:255.255.255.252::eth0:none:1.1.1.1:1.0.0.1")
+        );
+    }
+
+    #[test]
+    fn boot_args_uses_correct_gateway_for_idx() {
+        let args = build_vm_boot_args("", &Ipv4Addr::new(172, 16, 0, 2), 0);
+        assert!(args.contains("172.16.0.1"));
+        let args = build_vm_boot_args("", &Ipv4Addr::new(172, 16, 253, 2), 253);
+        assert!(args.contains("172.16.253.1"));
+    }
+
+    #[test]
+    fn chroot_dir_structure() {
+        let dir = build_chroot_dir(Path::new("/srv/jailer"), "vm-abc123");
+        assert_eq!(dir, PathBuf::from("/srv/jailer/firecracker/vm-abc123/root"));
+    }
+
+    #[test]
+    fn chroot_dir_with_different_base() {
+        let dir = build_chroot_dir(Path::new("/tmp"), "test-vm");
+        assert_eq!(dir, PathBuf::from("/tmp/firecracker/test-vm/root"));
+    }
+}
+
 // Prepares the jail directory. Layout on disk (chroot_dir = <chroot_base>/firecracker/<vm_id>/root/):
 //
 //   run/
