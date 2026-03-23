@@ -99,6 +99,7 @@ pub(crate) async fn provision_gateway_api_key(
 
     let client = reqwest::Client::builder()
         .danger_accept_invalid_certs(gateway_tls_accept_invalid_certs)
+        .use_native_tls()
         .build()
         .context("failed to build HTTP client")?;
     let resp = client
