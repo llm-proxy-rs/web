@@ -26,6 +26,12 @@ export function useConversations(
     loadConversationsFromStorage(vmId),
   );
 
+  // Re-load from localStorage when vmId changes (e.g. empty -> real ID)
+  useEffect(() => {
+    if (!vmId) return;
+    setConversations(loadConversationsFromStorage(vmId));
+  }, [vmId]);
+
   const createConversation = useCallback((): Conversation => {
     const conversation: Conversation = {
       conversationId: crypto.randomUUID(),
@@ -86,10 +92,11 @@ export function useConversations(
     });
   }, [loadHistory, vmId]);
 
-  // On mount: sync server sessions into local conversations
+  // Sync server sessions into local conversations whenever vmId becomes available
   useEffect(() => {
+    if (!vmId) return;
     syncConversationsFromHistory().catch(console.error);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [vmId, syncConversationsFromHistory]);
 
   return {
     conversations,

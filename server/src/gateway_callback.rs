@@ -47,7 +47,7 @@ pub(crate) async fn gateway_callback_handler(
     let pkce_verifier = session
         .remove::<String>("gateway_oauth_pkce_verifier")
         .await
-        .map_err(|_| anyhow::anyhow!("failed to retrieve PKCE verifier from session"))?
+        .map_err(|e| anyhow::anyhow!("failed to retrieve PKCE verifier from session: {e}"))?
         .context("PKCE verifier missing from session")?;
 
     // Remove stored nonce (validated implicitly via the token exchange)
@@ -57,7 +57,12 @@ pub(crate) async fn gateway_callback_handler(
     let access_token = exchange_gateway_code(&query.code, &pkce_verifier, &state.config).await?;
 
     // Provision API key
-    let api_key = provision_gateway_api_key(&access_token, &state.config.gateway_api_url).await?;
+    let api_key = provision_gateway_api_key(
+        &access_token,
+        &state.config.gateway_api_url,
+        state.config.gateway_tls_accept_invalid_certs,
+    )
+    .await?;
 
     info!("gateway API key provisioned successfully");
 
@@ -82,7 +87,6 @@ pub(crate) async fn gateway_callback_handler(
         &state.config.anthropic_default_haiku_model,
         &state.config.anthropic_default_sonnet_model,
         &state.config.anthropic_default_opus_model,
-        state.config.enable_mcp,
     )?;
 
     set_vm_settings(

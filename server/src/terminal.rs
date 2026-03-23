@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use axum::{
     Error as AxumError,
     extract::{
-        Path, State,
+        State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::{HeaderMap, StatusCode},
@@ -29,14 +29,10 @@ const SEND_TIMEOUT_SECS: u64 = 30;
 
 pub(crate) async fn handle_ws_upgrade(
     user_vm: UserVm,
-    Path(vm_id): Path<String>,
     headers: HeaderMap,
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
-    if user_vm.vm_id != vm_id {
-        return Ok((StatusCode::NOT_FOUND, "Session not found").into_response());
-    }
     // Validate Origin header to prevent cross-site WebSocket hijacking.
     // Browsers always send Origin on WebSocket upgrades; reject if it
     // doesn't match the Host header.
@@ -78,7 +74,7 @@ async fn run_terminal_session(
         error!("vm registry lock poisoned, aborting terminal session");
         return;
     }
-    if run_ssh_relay(guest_ip, &state, ws).await.is_err() {
+    if run_ssh_relay(guest_ip, &state, &vm_id, ws).await.is_err() {
         error!("terminal session error");
     }
     if save_and_drop_vm(&state, &vm_id, user_id).await.is_err() {
@@ -123,7 +119,12 @@ async fn save_vm_rootfs_on_disconnect(
         .context("failed to save rootfs")
 }
 
-async fn run_ssh_relay(guest_ip: Ipv4Addr, state: &AppState, ws: WebSocket) -> Result<()> {
+async fn run_ssh_relay(
+    guest_ip: Ipv4Addr,
+    state: &AppState,
+    vm_id: &str,
+    ws: WebSocket,
+) -> Result<()> {
     let mut ssh_handle = connect_ssh(
         guest_ip,
         &state.config.ssh_key_path,
@@ -151,12 +152,15 @@ async fn run_ssh_relay(guest_ip: Ipv4Addr, state: &AppState, ws: WebSocket) -> R
         tokio::select! {
             msg = ssh_channel.wait() => {
                 relay_ssh_to_ws(msg, &mut ws_sender).await?;
+                let _ = update_vm_last_activity(&state.vms, vm_id);
             }
             ws_msg = ws_rx.recv() => {
                 relay_ws_to_ssh(ws_msg, &mut ssh_channel, &mut ws_sender).await?;
+                let _ = update_vm_last_activity(&state.vms, vm_id);
             }
             _ = keepalive.tick() => {
                 send_ws_keepalive(&mut ws_sender).await?;
+                let _ = update_vm_last_activity(&state.vms, vm_id);
             }
         }
     }

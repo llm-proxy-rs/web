@@ -447,6 +447,16 @@ export async function setupApp(
     });
   });
 
+  // ── File/folder delete endpoint ──────────────────────────────────────────
+  await page.route("**/delete", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true }),
+    });
+  });
+
   // ── Composer file upload endpoint ─────────────────────────────────────────
   await page.route("**/chat-upload", async (route) => {
     uploadWasReceived = true;

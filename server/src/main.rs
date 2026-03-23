@@ -40,7 +40,7 @@ use crate::{
     },
     csrf::csrf_middleware,
     download::download_file_handler,
-    files::list_files_handler,
+    files::{delete_handler, list_files_handler},
     gateway_auth::renew_gateway_key_handler,
     gateway_callback::gateway_callback_handler,
     handlers::{
@@ -64,7 +64,7 @@ async fn main() -> Result<()> {
         )
         .init();
     let app_config = load_config()?;
-    let static_assets = load_static_assets(&app_config.static_dir);
+    let static_assets = load_static_assets(&app_config.static_dir)?;
     let pg_pool = store::connect_db(&app_config.database_url).await?;
     store::run_migrations(&pg_pool).await?;
     let session_store = PostgresStore::new(pg_pool.clone());
@@ -119,6 +119,7 @@ fn build_router(app_state: AppState, session_store: PostgresStore) -> Router {
             post(handle_chat_upload).layer(DefaultBodyLimit::max(50 * 1024 * 1024)),
         )
         .route("/ls", get(list_files_handler))
+        .route("/delete", post(delete_handler))
         .route("/download", get(download_file_handler))
         .route(
             "/upload",
@@ -132,7 +133,7 @@ fn build_router(app_state: AppState, session_store: PostgresStore) -> Router {
         .route("/api/csrf-token", get(get_csrf_token_handler))
         .route("/rootfs/delete", post(delete_user_rootfs_handler))
         .route("/terminal/{id}", get(get_terminal_page))
-        .route("/ws/{id}", get(handle_ws_upgrade))
+        .route("/ws", get(handle_ws_upgrade))
         .route("/login", get(get_login_handler))
         .route("/login/cognito", get(get_cognito_login_handler))
         .route("/logout", post(get_logout_handler))
@@ -230,7 +231,12 @@ fn spawn_idle_vm_sweep_task(app_state: AppState) -> tokio::task::JoinHandle<()> 
         interval.tick().await;
         loop {
             interval.tick().await;
-            sweep_idle_vms(&app_state.vms).await;
+            sweep_idle_vms(
+                &app_state.vms,
+                &app_state.config.user_rootfs_dir,
+                &app_state.rootfs_lock,
+            )
+            .await;
         }
     })
 }

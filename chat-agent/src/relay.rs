@@ -35,8 +35,9 @@ pub fn stream_task_sse(
             tx.clone(),
         )
         .await
+            && let Ok(payload) = build_sse_error_event(e)
         {
-            send_sse_error(&tx, e).await;
+            send_sse(&tx, payload).await;
         }
     });
     ReceiverStream::new(rx)
@@ -70,7 +71,9 @@ async fn run_task_stream(
     };
     match connect_result {
         Err(e) => {
-            send_sse_error(&tx, e).await;
+            if let Ok(payload) = build_sse_error_event(e) {
+                send_sse(&tx, payload).await;
+            }
         }
         Ok((ssh_handle, ssh_channel)) => {
             let line = match serde_json::to_string(&message) {
@@ -85,11 +88,15 @@ async fn run_task_stream(
                 .await
                 .context("failed to write message to agent socket")
             {
-                send_sse_error(&tx, e).await;
+                if let Ok(payload) = build_sse_error_event(e) {
+                    send_sse(&tx, payload).await;
+                }
                 return Ok(());
             }
-            if let Err(e) = stream_ssh_channel(ssh_handle, ssh_channel, &tx).await {
-                send_sse_error(&tx, e).await;
+            if let Err(e) = stream_ssh_channel(ssh_handle, ssh_channel, &tx).await
+                && let Ok(payload) = build_sse_error_event(e)
+            {
+                send_sse(&tx, payload).await;
             }
         }
     }

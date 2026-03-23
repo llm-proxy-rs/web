@@ -63,11 +63,11 @@ pub async fn save_all_vm_rootfs(
         "saving rootfs for {} running vm(s) before shutdown",
         vm_entries.len()
     );
-    save_vm_rootfs_to_dir(&vm_entries, user_rootfs_dir, rootfs_lock).await
+    save_vm_rootfs_to_dir(vm_entries.values(), user_rootfs_dir, rootfs_lock).await
 }
 
 async fn save_vm_rootfs_to_dir(
-    vm_entries: &HashMap<String, VmEntry>,
+    vm_entries: impl Iterator<Item = &VmEntry>,
     user_rootfs_dir: &Path,
     rootfs_lock: &AsyncMutex<()>,
 ) -> Result<()> {
@@ -77,7 +77,7 @@ async fn save_vm_rootfs_to_dir(
     let _guard = timeout(Duration::from_secs(LOCK_TIMEOUT_SECS), rootfs_lock.lock())
         .await
         .context("timed out waiting for rootfs lock")?;
-    for vm_entry in vm_entries.values() {
+    for vm_entry in vm_entries {
         let rootfs_path = build_user_rootfs_path(user_rootfs_dir, vm_entry.user_id);
         info!(dest = %rootfs_path.display(), "saving rootfs on shutdown");
         vm_entry

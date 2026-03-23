@@ -49,7 +49,7 @@ test.describe("vm provisioning", () => {
     });
 
     // Route WS so terminal doesn't error
-    await page.routeWebSocket(/\/ws\//, () => {});
+    await page.routeWebSocket(/\/ws\b/, () => {});
 
     await setupApp(page, { vmId: "" });
 
@@ -89,7 +89,7 @@ test.describe("vm provisioning", () => {
   test("VP-04 terminal WS not opened until vmId is set", async ({ page }) => {
     let wsConnected = false;
 
-    await page.routeWebSocket(/\/ws\//, () => {
+    await page.routeWebSocket(/\/ws\b/, () => {
       wsConnected = true;
     });
 

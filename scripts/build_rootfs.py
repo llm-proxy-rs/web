@@ -268,8 +268,13 @@ def install_system_packages(rootfs: Path) -> None:
     chroot_as_root(rootfs, CHROOT_ROOT_SCRIPT)
 
 
-def install_claude_code(rootfs: Path) -> None:
+def install_claude_code(rootfs: Path, mcp_base_url: str | None = None) -> None:
     chroot_as_ubuntu(rootfs, CHROOT_USER_SCRIPT)
+    if mcp_base_url:
+        chroot_as_ubuntu(
+            rootfs,
+            "~/.local/bin/claude mcp add --transport http gemini-websearch http://localhost:8443/mcp --scope user",
+        )
 
 
 def install_agent(rootfs: Path, mcp_base_url: str | None = None) -> None:
@@ -629,7 +634,7 @@ def main() -> None:
     mounts = mount_binds(rootfs)
     try:
         install_system_packages(rootfs)
-        install_claude_code(rootfs)
+        install_claude_code(rootfs, mcp_base_url=args.mcp_base_url)
         install_agent(rootfs, mcp_base_url=args.mcp_base_url)
     finally:
         unmount_binds(mounts)

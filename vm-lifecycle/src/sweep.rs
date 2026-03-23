@@ -1,14 +1,20 @@
-use std::time::Duration;
-use tracing::warn;
+use std::{path::Path, time::Duration};
+use tokio::{fs, sync::Mutex as AsyncMutex, time::timeout};
+use tracing::{info, warn};
 
-use crate::VmRegistry;
+use crate::{VmRegistry, build_user_rootfs_path};
 
 const IDLE_TIMEOUT: Duration = Duration::from_secs(300);
+const LOCK_TIMEOUT_SECS: u64 = 30;
 
-pub async fn sweep_idle_vms(vms: &VmRegistry) {
-    // Hold the removed entries in _stale_vms until after the lock is released
-    // so that their Drop runs outside the registry lock.
-    let _stale_vms = {
+// Save rootfs before dropping stale VMs. Vm::drop() is sync and kills the
+// process, so the async save_rootfs must happen while the VM is still alive.
+pub async fn sweep_idle_vms(
+    vms: &VmRegistry,
+    user_rootfs_dir: &Path,
+    rootfs_lock: &AsyncMutex<()>,
+) {
+    let stale_vms = {
         let Ok(mut registry) = vms.lock() else {
             warn!("vm registry mutex poisoned");
             return;
@@ -23,4 +29,25 @@ pub async fn sweep_idle_vms(vms: &VmRegistry) {
             .filter_map(|id| registry.remove(&id))
             .collect::<Vec<_>>()
     };
+
+    if stale_vms.is_empty() {
+        return;
+    }
+
+    info!("saving rootfs for {} swept vm(s)", stale_vms.len());
+    if let Err(e) = fs::create_dir_all(user_rootfs_dir).await {
+        warn!("failed to create user rootfs dir during sweep: {e}");
+        return;
+    }
+    let Ok(_guard) = timeout(Duration::from_secs(LOCK_TIMEOUT_SECS), rootfs_lock.lock()).await
+    else {
+        warn!("timed out waiting for rootfs lock during sweep");
+        return;
+    };
+    for vm_entry in &stale_vms {
+        let rootfs_path = build_user_rootfs_path(user_rootfs_dir, vm_entry.user_id);
+        if let Err(e) = vm_entry.vm.save_rootfs(&rootfs_path).await {
+            warn!(dest = %rootfs_path.display(), "failed to save rootfs during sweep: {e}");
+        }
+    }
 }

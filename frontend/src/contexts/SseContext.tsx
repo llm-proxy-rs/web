@@ -62,6 +62,8 @@ interface SseContextValue {
   getQuestionsForConversation: (
     conversationId: string,
   ) => StoredQuestion | null;
+  /** Reset vmId to trigger re-provisioning via vm-status polling. */
+  resetVmId: () => void;
 }
 
 const SseContext = createContext<SseContextValue | null>(null);
@@ -381,6 +383,13 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
     return data.entries as FileEntry[];
   }, []);
 
+  const resetVmId = useCallback(() => {
+    if (vmId) {
+      localStorage.removeItem(`chat_running_task_${vmId}`);
+    }
+    setVmId("");
+  }, [vmId]);
+
   return (
     <SseContext.Provider
       value={{
@@ -408,6 +417,7 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
         storeQuestion,
         clearQuestion,
         getQuestionsForConversation,
+        resetVmId,
       }}
     >
       {children}

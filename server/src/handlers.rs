@@ -140,8 +140,8 @@ impl FromRequestParts<AppState> for UserVm {
                 // Write settings to the freshly provisioned VM
                 write_initial_settings(parts, state, user_vm.guest_ip)
                     .await
-                    .map_err(|_| {
-                        error!("failed to write initial settings");
+                    .map_err(|e| {
+                        error!("failed to write initial settings: {e:#}");
                         (
                             StatusCode::INTERNAL_SERVER_ERROR,
                             "An internal error occurred",
@@ -183,7 +183,6 @@ async fn write_initial_settings(
             &state.config.anthropic_default_haiku_model,
             &state.config.anthropic_default_sonnet_model,
             &state.config.anthropic_default_opus_model,
-            state.config.enable_mcp,
         )?,
         None => return write_bedrock_settings(state, guest_ip).await,
     };
@@ -211,7 +210,6 @@ async fn write_gateway_settings_with_key(
         &state.config.anthropic_default_haiku_model,
         &state.config.anthropic_default_sonnet_model,
         &state.config.anthropic_default_opus_model,
-        state.config.enable_mcp,
     )?;
     chat_settings::set_vm_settings(
         guest_ip,
@@ -234,7 +232,6 @@ async fn write_bedrock_settings(state: &AppState, guest_ip: Ipv4Addr) -> Result<
         &state.config.anthropic_default_haiku_model,
         &state.config.anthropic_default_sonnet_model,
         &state.config.anthropic_default_opus_model,
-        state.config.enable_mcp,
     )?;
     chat_settings::set_vm_settings(
         guest_ip,
@@ -586,25 +583,43 @@ pub(crate) async fn handle_chat_upload(
     )
     .await?;
     let sftp = open_sftp_session(&mut ssh_handle).await?;
-    let remote_path = stream_chat_attachment(&mut multipart, &sftp).await?;
+    let remote_path =
+        stream_chat_attachment(&mut multipart, &sftp, &state.config.upload_dir).await?;
     let remote_path_str = remote_path
         .to_str()
         .context("remote path is not valid UTF-8")?;
     Ok(Json(serde_json::json!({"path": remote_path_str})).into_response())
 }
 
-async fn stream_chat_attachment(multipart: &mut Multipart, sftp: &SftpSession) -> Result<PathBuf> {
+async fn stream_chat_attachment(
+    multipart: &mut Multipart,
+    sftp: &SftpSession,
+    upload_dir: &Path,
+) -> Result<PathBuf> {
+    let mut target_dir: Option<String> = None;
     while let Some(field) = multipart
         .next_field()
         .await
         .context("failed to read multipart field")?
     {
-        if field.name().context("multipart field missing name")? == "file" {
+        let name = field
+            .name()
+            .context("multipart field missing name")?
+            .to_owned();
+        if name == "dir" {
+            target_dir = Some(field.text().await.context("failed to read dir field")?);
+            continue;
+        }
+        if name == "file" {
             let filename = field
                 .file_name()
                 .context("file upload missing filename")?
                 .to_owned();
-            let remote_path = build_chat_upload_path(&filename)?;
+            let dest_dir = match &target_dir {
+                Some(d) => PathBuf::from(d),
+                None => upload_dir.to_path_buf(),
+            };
+            let remote_path = build_chat_upload_path(&filename, &dest_dir)?;
             let real_path = PathBuf::from(
                 timeout(
                     Duration::from_secs(SFTP_OP_TIMEOUT_SECS),
@@ -625,8 +640,7 @@ async fn stream_chat_attachment(multipart: &mut Multipart, sftp: &SftpSession) -
                     .file_name()
                     .context("chat upload path has no filename")?,
             );
-            let chat_upload_dir = PathBuf::from("/tmp");
-            validate_within_dir(&real_path, &chat_upload_dir)?;
+            validate_within_dir(&real_path, upload_dir)?;
             let mut reader = StreamReader::new(field.map_err(IoError::other));
             write_chat_file_via_sftp(sftp, &real_path, &mut reader).await?;
             return Ok(real_path);
@@ -635,13 +649,13 @@ async fn stream_chat_attachment(multipart: &mut Multipart, sftp: &SftpSession) -
     Err(anyhow!("missing 'file' field"))
 }
 
-fn build_chat_upload_path(filename: &str) -> Result<PathBuf> {
+fn build_chat_upload_path(filename: &str, upload_dir: &Path) -> Result<PathBuf> {
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .context("system clock is before Unix epoch")?
         .as_millis();
     let safe_name = sanitize_filename::sanitize(filename);
-    Ok(PathBuf::from("/tmp").join(format!("{ts}_{safe_name}")))
+    Ok(upload_dir.join(format!("{ts}_{safe_name}")))
 }
 
 /// Validates that a session_id looks like a UUID (alphanumeric + hyphens only).
@@ -734,32 +748,36 @@ mod tests {
 
     #[test]
     fn chat_upload_path_normal_filename() {
-        let path = build_chat_upload_path("test.png").unwrap();
-        assert!(path.starts_with("/tmp"));
+        let dir = PathBuf::from("/home/ubuntu");
+        let path = build_chat_upload_path("test.png", &dir).unwrap();
+        assert!(path.starts_with("/home/ubuntu"));
         assert!(path.to_string_lossy().contains("test.png"));
     }
 
     #[test]
     fn chat_upload_path_sanitizes_traversal() {
-        let path = build_chat_upload_path("../../../etc/passwd").unwrap();
+        let dir = PathBuf::from("/home/ubuntu");
+        let path = build_chat_upload_path("../../../etc/passwd", &dir).unwrap();
         // sanitize_filename removes path separators; the remaining filename
         // is harmless because validate_within_dir checks the canonical path
         // before any SFTP write.
         let name = path.file_name().unwrap().to_string_lossy();
         assert!(!name.contains('/'));
-        assert!(path.starts_with("/tmp"));
+        assert!(path.starts_with("/home/ubuntu"));
     }
 
     #[test]
     fn chat_upload_path_sanitizes_slashes() {
-        let path = build_chat_upload_path("path/to/file.txt").unwrap();
+        let dir = PathBuf::from("/home/ubuntu");
+        let path = build_chat_upload_path("path/to/file.txt", &dir).unwrap();
         let name = path.file_name().unwrap().to_string_lossy();
         assert!(!name.contains('/'));
     }
 
     #[test]
     fn chat_upload_path_includes_timestamp() {
-        let path = build_chat_upload_path("file.txt").unwrap();
+        let dir = PathBuf::from("/home/ubuntu");
+        let path = build_chat_upload_path("file.txt", &dir).unwrap();
         let name = path.file_name().unwrap().to_string_lossy();
         // Timestamp is a large number followed by underscore
         assert!(name.contains('_'));
