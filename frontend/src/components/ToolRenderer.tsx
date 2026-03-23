@@ -7,19 +7,22 @@ interface ToolRendererProps {
   toolName: string;
   toolInput: Record<string, unknown>;
   toolResult?: ToolResult;
+  autoExpandTools?: boolean;
 }
 
 export default function ToolRenderer({
   toolName,
   toolInput,
   toolResult,
+  autoExpandTools,
 }: ToolRendererProps) {
   return (
-    <div className="my-0.5 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+    <div className="my-0.5 overflow-hidden rounded-xl border border-border/60 bg-card shadow-md shadow-black/5 ring-1 ring-border/10">
       <ToolHeader
         toolName={toolName}
         toolInput={toolInput}
         toolResult={toolResult}
+        autoExpandTools={autoExpandTools}
       />
     </div>
   );
@@ -73,36 +76,39 @@ function ToolHeader({
   toolName,
   toolInput,
   toolResult,
+  autoExpandTools,
 }: {
   toolName: string;
   toolInput: Record<string, unknown>;
   toolResult?: ToolResult;
+  autoExpandTools?: boolean;
 }) {
   const diffProps = isEditTool(toolName)
     ? getDiffProps(toolName, toolInput)
     : null;
-  const [open, setOpen] = React.useState(diffProps !== null);
+  const [open, setOpen] = React.useState(autoExpandTools || diffProps !== null);
   const summary = buildSummary(toolName, toolInput);
 
   return (
     <div>
       <button
+        type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-accent/50 active:bg-accent/70"
+        className="flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors duration-100 hover:bg-accent/50 active:bg-accent/70"
       >
-        <Wrench className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
-        <span className="flex-1 truncate text-xs">
+        <Wrench className="h-3 w-3 flex-shrink-0 text-muted-foreground/60" />
+        <span className="flex-1 truncate text-sm">
           <span className="font-medium text-muted-foreground">{toolName}</span>
           {summary && (
-            <span className="ml-2 font-mono text-[11px] text-foreground/60">
+            <span className="ml-2 font-mono text-xs text-foreground/50">
               {summary}
             </span>
           )}
         </span>
         {open ? (
-          <ChevronDown className="h-3 w-3 flex-shrink-0 text-muted-foreground/50" />
+          <ChevronDown className="h-3 w-3 flex-shrink-0 text-muted-foreground/40" />
         ) : (
-          <ChevronRight className="h-3 w-3 flex-shrink-0 text-muted-foreground/50" />
+          <ChevronRight className="h-3 w-3 flex-shrink-0 text-muted-foreground/40" />
         )}
       </button>
 
@@ -115,7 +121,7 @@ function ToolHeader({
         />
       )}
       {open && !diffProps && (
-        <div className="border-t border-border px-3 py-2">
+        <div className="border-t border-border/60 px-3 py-2.5">
           <ToolInputBody toolName={toolName} toolInput={toolInput} />
         </div>
       )}
@@ -147,7 +153,7 @@ function ToolInputBody({
   if (toolName === "TodoWrite" || toolName === "TodoRead")
     return <TodoInputBody toolInput={toolInput} />;
   return (
-    <pre className="overflow-x-auto text-xs text-muted-foreground">
+    <pre className="overflow-x-auto text-sm text-muted-foreground">
       {JSON.stringify(toolInput, null, 2)}
     </pre>
   );
@@ -159,12 +165,12 @@ function BashInputBody({ toolInput }: { toolInput: Record<string, unknown> }) {
   return (
     <div>
       {typeof cmd === "string" && (
-        <pre className="overflow-x-auto whitespace-pre-wrap break-all font-mono text-xs text-foreground/80">
+        <pre className="overflow-x-auto whitespace-pre-wrap break-all font-mono text-sm text-foreground/80">
           {cmd}
         </pre>
       )}
       {typeof desc === "string" && (
-        <p className="mt-1 text-[11px] text-muted-foreground">{desc}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{desc}</p>
       )}
     </div>
   );
@@ -174,9 +180,9 @@ function GrepInputBody({ toolInput }: { toolInput: Record<string, unknown> }) {
   const pattern = toolInput.pattern;
   const path = toolInput.path ?? toolInput.glob;
   return (
-    <div className="flex flex-wrap items-center gap-2 text-xs">
+    <div className="flex flex-wrap items-center gap-2 text-sm">
       {typeof pattern === "string" && (
-        <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-foreground/80">
+        <code className="rounded-md bg-muted/60 px-1.5 py-0.5 font-mono text-foreground/80">
           /{pattern}/
         </code>
       )}
@@ -191,9 +197,9 @@ function GlobInputBody({ toolInput }: { toolInput: Record<string, unknown> }) {
   const pattern = toolInput.pattern;
   const path = toolInput.path;
   return (
-    <div className="flex flex-wrap items-center gap-2 text-xs">
+    <div className="flex flex-wrap items-center gap-2 text-sm">
       {typeof pattern === "string" && (
-        <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-foreground/80">
+        <code className="rounded-md bg-muted/60 px-1.5 py-0.5 font-mono text-foreground/80">
           {pattern}
         </code>
       )}
@@ -211,7 +217,7 @@ function WebFetchInputBody({
 }) {
   const url = toolInput.url;
   return typeof url === "string" ? (
-    <span className="break-all text-xs text-muted-foreground">{url}</span>
+    <span className="break-all text-sm text-muted-foreground">{url}</span>
   ) : null;
 }
 
@@ -222,7 +228,7 @@ function WebSearchInputBody({
 }) {
   const query = toolInput.query;
   return typeof query === "string" ? (
-    <span className="text-xs text-muted-foreground">{query}</span>
+    <span className="text-sm text-muted-foreground">{query}</span>
   ) : null;
 }
 
@@ -230,7 +236,7 @@ function TodoInputBody({ toolInput }: { toolInput: Record<string, unknown> }) {
   const todos = toolInput.todos;
   if (Array.isArray(todos)) {
     return (
-      <ul className="space-y-0.5 text-xs text-muted-foreground">
+      <ul className="space-y-0.5 text-sm text-muted-foreground">
         {todos.slice(0, 5).map((todo, i) => (
           <li key={i} className="truncate">
             {typeof todo === "object" && todo !== null
@@ -248,7 +254,7 @@ function TodoInputBody({ toolInput }: { toolInput: Record<string, unknown> }) {
     );
   }
   return (
-    <pre className="overflow-x-auto text-xs text-muted-foreground">
+    <pre className="overflow-x-auto text-sm text-muted-foreground">
       {JSON.stringify(toolInput, null, 2)}
     </pre>
   );
@@ -260,10 +266,10 @@ function ToolResultView({ result }: { result: ToolResult }) {
 
   return (
     <div
-      className={`border-t border-border px-3 py-2 ${result.isError ? "bg-destructive/5" : "bg-muted/30"}`}
+      className={`border-t border-border/60 px-3 py-2.5 ${result.isError ? "bg-destructive/5" : "bg-muted/15"}`}
     >
       {result.isError && (
-        <div className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-destructive">
+        <div className="mb-1 text-xs font-semibold uppercase tracking-widest text-destructive">
           Error
         </div>
       )}
@@ -271,7 +277,7 @@ function ToolResultView({ result }: { result: ToolResult }) {
         <div>
           <div className="relative overflow-hidden">
             <pre
-              className={`whitespace-pre-wrap break-words font-mono text-xs ${
+              className={`whitespace-pre-wrap break-words font-mono text-sm ${
                 result.isError ? "text-destructive" : "text-muted-foreground"
               } ${!open ? "max-h-24" : ""}`}
               style={{ overflow: open ? "auto" : "hidden" }}
@@ -283,15 +289,16 @@ function ToolResultView({ result }: { result: ToolResult }) {
             )}
           </div>
           <button
+            type="button"
             onClick={() => setOpen((v) => !v)}
-            className="mt-1 text-[10px] text-primary hover:underline"
+            className="mt-1 text-xs text-primary hover:underline"
           >
             {open ? "Show less" : "Show more"}
           </button>
         </div>
       ) : (
         <pre
-          className={`whitespace-pre-wrap break-words font-mono text-xs ${
+          className={`whitespace-pre-wrap break-words font-mono text-sm ${
             result.isError ? "text-destructive" : "text-muted-foreground"
           }`}
         >

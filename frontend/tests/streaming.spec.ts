@@ -1,6 +1,6 @@
 /**
  * UF-06  Empty thinking removed  — animated dots gone when no thinking_delta arrives
- * UF-07  Thinking hidden       — thinking content is hidden from chat view
+ * UF-07  Thinking visible       — thinking content is shown in the chat view
  * UF-07b Claude header after thinking — assistant text after thinking shows Claude header
  * UF-08  Tool use with result    — tool card shows result after tool_result event
  * UF-09  Stop streaming          — Stop button sends stop request
@@ -29,18 +29,23 @@ test.describe("streaming", () => {
     await expect(thinkingIndicator).not.toBeVisible();
   });
 
-  test("UF-07 thinking content is hidden from the chat view", async ({
+  test("UF-07 thinking content is visible in the chat view", async ({
     page,
   }) => {
     const ctrl = await setupApp(page, { sessions: [] });
 
     await sendMessage(page, "Deep question");
-    ctrl.sendSseEvents(sse.withThinking("My reasoning here…", "The answer is 42.", "sess-2"));
+    ctrl.sendSseEvents(
+      sse.withThinking("My reasoning here…", "The answer is 42.", "sess-2"),
+    );
 
     // The assistant response is shown
     await expect(page.getByText("The answer is 42.")).toBeVisible();
-    // Thinking block is NOT visible — thinking is hidden from chat
-    await expect(page.getByText("Thinking…")).not.toBeVisible();
+    // Thinking block is visible as a collapsible section
+    await expect(page.getByText("Thinking")).toBeVisible();
+    // Expand the thinking block to see the content
+    await page.getByText("Thinking").click();
+    await expect(page.getByText("My reasoning here…")).toBeVisible();
   });
 
   test("UF-07b assistant text after thinking block shows Claude header", async ({
@@ -49,14 +54,18 @@ test.describe("streaming", () => {
     const ctrl = await setupApp(page, { sessions: [] });
 
     await sendMessage(page, "Deep question");
-    ctrl.sendSseEvents(sse.withThinking("My reasoning…", "The answer is 42.", "sess-2b"));
+    ctrl.sendSseEvents(
+      sse.withThinking("My reasoning…", "The answer is 42.", "sess-2b"),
+    );
 
     // The "Claude" header should be visible on the assistant response
     await expect(page.getByText("Claude").first()).toBeVisible();
     await expect(page.getByText("The answer is 42.")).toBeVisible();
   });
 
-  test("UF-08 tool card shown with result after tool_result event", async ({ page }) => {
+  test("UF-08 tool card shown with result after tool_result event", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, { sessions: [] });
 
     await sendMessage(page, "Run ls");
@@ -81,20 +90,29 @@ test.describe("streaming", () => {
     await expect(page.getByText("Done.")).toBeVisible();
   });
 
-  test("UF-09 clicking Stop sends a stop request to the server", async ({ page }) => {
+  test("UF-09 clicking Stop aborts the in-flight request when task_id is not yet available", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, { sessions: [] });
 
     // Send a message so the streaming state activates (no SSE events yet)
     await sendMessage(page, "Long task");
 
-    // The stop button is in the ClaudeStatus bar while streaming
+    // The stop button is in the composer while streaming
     await expect(page.getByRole("status")).toBeVisible();
     await page.getByTitle("Stop (Esc)").first().click();
 
-    expect(ctrl.stopRequested()).toBe(true);
+    // No task_id available yet, so no /chat-stop POST — instead the fetch is aborted
+    // and the running state is cleared (composer re-enabled)
+    expect(ctrl.stopRequested()).toBe(false);
+    await expect(
+      page.locator('textarea[placeholder="Message Claude…"]'),
+    ).toBeEnabled();
   });
 
-  test("UF-10 ask user question panel shown and answer submitted", async ({ page }) => {
+  test("UF-10 ask user question panel shown and answer submitted", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, { sessions: [] });
 
     await sendMessage(page, "Help me choose");
@@ -124,10 +142,14 @@ test.describe("streaming", () => {
     // The answer request should have been sent
     const answerBody = ctrl.lastAnswerBody();
     expect(answerBody?.request_id).toBe("req-1");
-    expect(answerBody?.answers["Which option do you prefer?"]).toContain("Option A");
+    expect(answerBody?.answers["Which option do you prefer?"]).toContain(
+      "Option A",
+    );
   });
 
-  test("UF-11 stop request body includes the task_id from session_start", async ({ page }) => {
+  test("UF-11 stop request body includes the task_id from session_start", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, { sessions: [] });
 
     await sendMessage(page, "Long task");
@@ -140,11 +162,15 @@ test.describe("streaming", () => {
     await expect(page.locator(".thinking-dot").first()).toBeVisible();
 
     const [stopReq] = await Promise.all([
-      page.waitForRequest((r) => r.url().includes("chat-stop") && r.method() === "POST"),
+      page.waitForRequest(
+        (r) => r.url().includes("chat-stop") && r.method() === "POST",
+      ),
       page.getByTitle("Stop (Esc)").first().click(),
     ]);
 
-    const stopBody = JSON.parse(stopReq.postData() ?? "{}") as { task_id?: string };
+    const stopBody = JSON.parse(stopReq.postData() ?? "{}") as {
+      task_id?: string;
+    };
     expect(stopBody.task_id).toBe("task-abc");
   });
 
@@ -171,7 +197,10 @@ test.describe("streaming", () => {
     await page.getByRole("button", { name: "Yes" }).click();
 
     const [answerReq] = await Promise.all([
-      page.waitForRequest((r) => r.url().includes("chat-question-answer") && r.method() === "POST"),
+      page.waitForRequest(
+        (r) =>
+          r.url().includes("chat-question-answer") && r.method() === "POST",
+      ),
       page.getByRole("button", { name: "Submit" }).click(),
     ]);
 
@@ -214,7 +243,10 @@ test.describe("streaming", () => {
     await page.getByRole("button", { name: "Notifications" }).click();
 
     const [answerReq] = await Promise.all([
-      page.waitForRequest((r) => r.url().includes("chat-question-answer") && r.method() === "POST"),
+      page.waitForRequest(
+        (r) =>
+          r.url().includes("chat-question-answer") && r.method() === "POST",
+      ),
       page.getByRole("button", { name: "Submit" }).click(),
     ]);
 
@@ -222,6 +254,8 @@ test.describe("streaming", () => {
       answers: Record<string, string>;
     };
     // Both selected options are joined with ", " by buildAnswers()
-    expect(answerBody.answers["Which features do you want?"]).toBe("Dark mode, Notifications");
+    expect(answerBody.answers["Which features do you want?"]).toBe(
+      "Dark mode, Notifications",
+    );
   });
 });

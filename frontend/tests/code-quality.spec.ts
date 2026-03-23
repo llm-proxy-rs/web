@@ -4,17 +4,27 @@
  * CQ-03  Per-message error boundary — one bad message doesn't break the whole pane
  */
 import { test, expect } from "@playwright/test";
-import { setupApp, sendMessage, sse, makeSession, makeConversation } from "./helpers/setup";
+import {
+  setupApp,
+  sendMessage,
+  sse,
+  makeSession,
+  makeConversation,
+} from "./helpers/setup";
 
 test.describe("code quality fixes", () => {
-  test("CQ-01 localStorage writes are debounced during SSE streaming", async ({ page }) => {
+  test("CQ-01 localStorage writes are debounced during SSE streaming", async ({
+    page,
+  }) => {
     // Instrument localStorage.setItem to count writes to chat_messages_task_* keys
     await page.addInitScript(() => {
-      (window as unknown as Record<string, number>).__chatMessagesWriteCount = 0;
+      (window as unknown as Record<string, number>).__chatMessagesWriteCount =
+        0;
       const origSetItem = Storage.prototype.setItem;
       Storage.prototype.setItem = function (key: string, value: string) {
         if (key.startsWith("chat_messages_task_")) {
-          (window as unknown as Record<string, number>).__chatMessagesWriteCount++;
+          (window as unknown as Record<string, number>)
+            .__chatMessagesWriteCount++;
         }
         return origSetItem.call(this, key, value);
       };
@@ -32,7 +42,10 @@ test.describe("code quality fixes", () => {
         event: "text_delta" as const,
         data: { text: `word${i} ` },
       })),
-      { event: "done" as const, data: { session_id: "sess-debounce", task_id: "task-debounce" } },
+      {
+        event: "done" as const,
+        data: { session_id: "sess-debounce", task_id: "task-debounce" },
+      },
     ];
     ctrl.sendSseEvents(events);
 
@@ -41,7 +54,8 @@ test.describe("code quality fixes", () => {
 
     // Check that total writes were significantly fewer than 22 (one per event)
     const writeCount = await page.evaluate(
-      () => (window as unknown as Record<string, number>).__chatMessagesWriteCount,
+      () =>
+        (window as unknown as Record<string, number>).__chatMessagesWriteCount,
     );
     expect(writeCount).toBeLessThanOrEqual(5);
 
@@ -50,11 +64,29 @@ test.describe("code quality fixes", () => {
     await expect(page.getByText("word19")).toBeVisible();
   });
 
-  test("CQ-02 switching conversations aborts stale transcript loads", async ({ page }) => {
-    const sessA = makeSession({ session_id: "sess-a", title: "Session A", project_dir: "/home/ubuntu" });
-    const sessB = makeSession({ session_id: "sess-b", title: "Session B", project_dir: "/home/ubuntu" });
-    const convA = makeConversation({ sessionId: "sess-a", projectDir: "/home/ubuntu", title: "Session A" });
-    const convB = makeConversation({ sessionId: "sess-b", projectDir: "/home/ubuntu", title: "Session B" });
+  test("CQ-02 switching conversations aborts stale transcript loads", async ({
+    page,
+  }) => {
+    const sessA = makeSession({
+      session_id: "sess-a",
+      title: "Session A",
+      project_dir: "/home/ubuntu",
+    });
+    const sessB = makeSession({
+      session_id: "sess-b",
+      title: "Session B",
+      project_dir: "/home/ubuntu",
+    });
+    const convA = makeConversation({
+      sessionId: "sess-a",
+      projectDir: "/home/ubuntu",
+      title: "Session A",
+    });
+    const convB = makeConversation({
+      sessionId: "sess-b",
+      projectDir: "/home/ubuntu",
+      title: "Session B",
+    });
 
     // Track transcript fetches and control their timing
     let transcriptAResolve: ((value: Response) => void) | null = null;
@@ -65,7 +97,11 @@ test.describe("code quality fixes", () => {
       transcripts: {
         "sess-b": [
           { role: "user", content: "Hello B", isCompactSummary: false },
-          { role: "assistant", content: [{ type: "text", text: "Response B" }], isCompactSummary: false },
+          {
+            role: "assistant",
+            content: [{ type: "text", text: "Response B" }],
+            isCompactSummary: false,
+          },
         ],
       },
     });
@@ -88,7 +124,11 @@ test.describe("code quality fixes", () => {
             body: JSON.stringify({
               messages: [
                 { role: "user", content: "Hello A", isCompactSummary: false },
-                { role: "assistant", content: [{ type: "text", text: "STALE RESPONSE A" }], isCompactSummary: false },
+                {
+                  role: "assistant",
+                  content: [{ type: "text", text: "STALE RESPONSE A" }],
+                  isCompactSummary: false,
+                },
               ],
             }),
           });
@@ -102,7 +142,11 @@ test.describe("code quality fixes", () => {
           body: JSON.stringify({
             messages: [
               { role: "user", content: "Hello B", isCompactSummary: false },
-              { role: "assistant", content: [{ type: "text", text: "Response B" }], isCompactSummary: false },
+              {
+                role: "assistant",
+                content: [{ type: "text", text: "Response B" }],
+                isCompactSummary: false,
+              },
             ],
           }),
         });
@@ -122,7 +166,9 @@ test.describe("code quality fixes", () => {
     await expect(page.getByText("STALE RESPONSE A")).not.toBeVisible();
   });
 
-  test("CQ-03 per-message error boundary isolates render failures", async ({ page }) => {
+  test("CQ-03 per-message error boundary isolates render failures", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, { sessions: [] });
 
     // Send a normal message and get a normal response
@@ -138,7 +184,10 @@ test.describe("code quality fixes", () => {
       { event: "session_start", data: { task_id: "task-err" } },
       { event: "init" },
       { event: "text_delta", data: { text: "__FORCE_RENDER_ERROR__" } },
-      { event: "done", data: { session_id: "sess-err-2", task_id: "task-err" } },
+      {
+        event: "done",
+        data: { session_id: "sess-err-2", task_id: "task-err" },
+      },
     ]);
 
     // The error boundary should catch it and render the fallback

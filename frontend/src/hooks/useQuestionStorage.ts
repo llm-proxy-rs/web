@@ -1,5 +1,17 @@
 import { useCallback } from "react";
 import type { StoredQuestion } from "../types";
+import { safeJsonParse } from "../utils/safeJson";
+
+function isStoredQuestion(v: unknown): v is StoredQuestion {
+  if (typeof v !== "object" || v === null) return false;
+  const obj = v as Record<string, unknown>;
+  return (
+    typeof obj.conversationId === "string" &&
+    typeof obj.taskId === "string" &&
+    typeof obj.requestId === "string" &&
+    Array.isArray(obj.questions)
+  );
+}
 
 export function useQuestionStorage() {
   const storeQuestion = useCallback(
@@ -19,10 +31,11 @@ export function useQuestionStorage() {
         const key = localStorage.key(i);
         if (key?.startsWith("question_")) {
           try {
-            const data = JSON.parse(
-              localStorage.getItem(key)!,
-            ) as StoredQuestion;
-            if (data.conversationId === conversationId) {
+            const data = safeJsonParse<unknown>(localStorage.getItem(key)!);
+            if (
+              isStoredQuestion(data) &&
+              data.conversationId === conversationId
+            ) {
               return data;
             }
           } catch {

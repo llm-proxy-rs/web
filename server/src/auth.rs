@@ -6,9 +6,13 @@ use axum::{
 use handlers::{AppState as CognitoState, CallbackQuery, callback, login};
 use store::upsert_user;
 use tower_sessions::Session;
-use tracing::{error, warn};
+use tracing::error;
 
-use crate::{state::AppState, templates::render_login_page};
+use crate::{
+    gateway_auth::{initiate_gateway_login, is_gateway_configured},
+    state::{AppError, AppState},
+    templates::render_login_page,
+};
 
 pub(crate) struct User {
     pub(crate) email: String,
@@ -21,8 +25,8 @@ impl<S: Send + Sync> FromRequestParts<S> for User {
         let session = Session::from_request_parts(parts, state)
             .await
             .map_err(|session_error| session_error.into_response())?;
-        let email = session.get::<String>("email").await.map_err(|e| {
-            error!("session lookup failed: {e}");
+        let email = session.get::<String>("email").await.map_err(|_| {
+            error!("session lookup failed");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "An internal error occurred",
@@ -53,63 +57,46 @@ pub(crate) async fn get_login_handler() -> Html<String> {
 pub(crate) async fn get_cognito_login_handler(
     session: Session,
     State(state): State<AppState>,
-) -> Response {
+) -> Result<Response, AppError> {
     let cognito_state = build_cognito_state(&state);
-    login(session, State(cognito_state))
-        .await
-        .unwrap_or_else(|e| {
-            error!("cognito login failed: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "An internal error occurred",
-            )
-                .into_response()
-        })
+    Ok(login(session, State(cognito_state)).await?)
 }
 
 pub(crate) async fn get_callback_handler(
     query: Query<CallbackQuery>,
     session: Session,
     State(state): State<AppState>,
-) -> Response {
+) -> Result<Response, AppError> {
     let cognito_state = build_cognito_state(&state);
-    let response = callback(query, session.clone(), State(cognito_state))
+    let _response = callback(query, session.clone(), State(cognito_state)).await?;
+    let email = session
+        .get::<String>("email")
         .await
-        .unwrap_or_else(|e| {
-            error!("cognito callback failed: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "An internal error occurred",
-            )
-                .into_response()
-        });
-    let email = match session.get::<String>("email").await {
-        Ok(email) => email,
-        Err(e) => {
-            error!("session lookup failed: {e}");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "An internal error occurred",
-            )
-                .into_response();
-        }
-    };
+        .map_err(|_| anyhow::anyhow!("session lookup failed"))?;
     if let Some(email) = email
-        && let Err(e) = upsert_user(&state.db, &email).await
+        && upsert_user(&state.db, &email).await.is_err()
     {
-        error!("upsert_user failed: {e}");
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "An internal error occurred",
-        )
-            .into_response();
+        return Err(anyhow::anyhow!("upsert_user failed").into());
     }
-    response
+
+    // If gateway federation is configured, redirect to gateway Cognito for
+    // silent SSO to provision an API key automatically.
+    if is_gateway_configured(&state.config) {
+        match initiate_gateway_login(&session, &state.config).await {
+            Ok(authorize_url) => return Ok(Redirect::to(&authorize_url).into_response()),
+            Err(_) => {
+                return Err(anyhow::anyhow!("failed to initiate gateway login").into());
+            }
+        }
+    }
+
+    Ok(Redirect::to("/").into_response())
 }
 
-pub(crate) async fn get_logout_handler(session: Session) -> impl IntoResponse {
-    if let Err(e) = session.delete().await {
-        warn!("session delete failed during logout: {e}");
-    }
-    Redirect::to("/login")
+pub(crate) async fn get_logout_handler(session: Session) -> Result<Response, AppError> {
+    session
+        .delete()
+        .await
+        .map_err(|_| anyhow::anyhow!("session delete failed during logout"))?;
+    Ok(Redirect::to("/login").into_response())
 }

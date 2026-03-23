@@ -1,3 +1,4 @@
+use anyhow::{Context, Result};
 use russh_sftp::client::{SftpSession, fs::DirEntry};
 use std::path::{Path, PathBuf};
 
@@ -7,14 +8,13 @@ use std::path::{Path, PathBuf};
 pub(crate) async fn find_all_project_dirs(
     sftp: &SftpSession,
     ssh_user_home: &Path,
-) -> Vec<PathBuf> {
+) -> Result<Vec<PathBuf>> {
     let projects_base = build_projects_base_path(ssh_user_home);
-    // Directory may not exist yet on a fresh VM; treat as empty rather than an error
     let top_entries: Vec<DirEntry> = sftp
-        .read_dir(projects_base.to_str().expect("path is valid UTF-8"))
+        .read_dir(projects_base.to_str().context("path is not valid UTF-8")?)
         .await
         .map(|entries| entries.collect())
-        .unwrap_or_default();
+        .unwrap_or_default(); // projects dir may not exist yet if Claude Code has never been run
     let mut project_dirs = Vec::new();
     for entry in top_entries {
         let name = entry.file_name();
@@ -26,7 +26,7 @@ pub(crate) async fn find_all_project_dirs(
             project_dirs.push(path);
         }
     }
-    project_dirs
+    Ok(project_dirs)
 }
 
 fn build_projects_base_path(ssh_user_home: &Path) -> PathBuf {

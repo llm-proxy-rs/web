@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result};
 use bytes::Bytes;
 use russh::{Channel, client};
 use ssh_client::{SshClient, connect_ssh};
@@ -51,7 +51,7 @@ async fn open_agent_channel(
         poll_agent_channel(ssh_handle),
     )
     .await
-    .unwrap_or_else(|_| Err(anyhow!("timed out waiting for agent socket")))
+    .context("timed out waiting for agent socket")?
 }
 
 async fn poll_agent_channel(

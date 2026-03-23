@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::Serialize;
 use sftp_client::open_sftp_session;
 use ssh_client::connect_ssh;
@@ -32,7 +32,7 @@ pub async fn fetch_chat_history(
     let sftp = open_sftp_session(&mut ssh_handle).await?;
     let path = project_dir.join(Path::new(session_id).with_extension("jsonl"));
     let mut file = sftp
-        .open(path.to_str().expect("path is valid UTF-8"))
+        .open(path.to_str().context("path is not valid UTF-8")?)
         .await?;
     let mut contents = String::new();
     file.read_to_string(&mut contents).await?;

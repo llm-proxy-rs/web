@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { ChevronRight, Download, Folder, File, PanelRightClose, Upload } from "lucide-react";
+import { ChevronRight, Download, Folder, File, Upload, X } from "lucide-react";
 import { useSse } from "../contexts/SseContext";
 import type { FileEntry } from "../types";
 
@@ -18,7 +18,7 @@ function parentPath(path: string, rootPath: string): string {
 }
 
 export default function FileManager({ onClose }: { onClose?: () => void }) {
-  const { uploadDir, uploadAction, csrfToken } = useSse();
+  const { uploadDir, uploadAction, csrfFetch } = useSse();
   const [currentPath, setCurrentPath] = useState(uploadDir);
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -55,15 +55,10 @@ export default function FileManager({ onClose }: { onClose?: () => void }) {
     async (file: File) => {
       flushSync(() => setUploadStatus("Uploading…"));
       const formData = new FormData();
-      formData.append(
-        "path",
-        currentPath.replace(/\/$/, "") + "/" + file.name.replace(/[/\\]/g, "_"),
-      );
       formData.append("file", file);
       try {
-        const res = await fetch(uploadAction, {
+        const res = await csrfFetch(uploadAction, {
           method: "POST",
-          headers: { "x-csrf-token": csrfToken },
           body: formData,
         });
         if (res.ok) {
@@ -80,7 +75,7 @@ export default function FileManager({ onClose }: { onClose?: () => void }) {
         3000,
       );
     },
-    [csrfToken, currentPath, uploadAction, loadDir],
+    [csrfFetch, currentPath, uploadAction, loadDir],
   );
 
   useEffect(() => {
@@ -97,10 +92,10 @@ export default function FileManager({ onClose }: { onClose?: () => void }) {
     <div className="flex min-h-0 flex-1 flex-col bg-card">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-3 py-2">
-        <span className="text-sm font-semibold text-foreground">Files</span>
+        <span className="text-base font-semibold text-foreground">Files</span>
         <div className="flex items-center gap-1">
           <label
-            className="flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+            className="flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
             title="Upload file"
           >
             <Upload className="h-3.5 w-3.5" />
@@ -119,18 +114,18 @@ export default function FileManager({ onClose }: { onClose?: () => void }) {
           </label>
           {onClose && (
             <button
-              title="Hide files"
+              title="Close"
               onClick={onClose}
               className="flex items-center justify-center rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
             >
-              <PanelRightClose className="h-3.5 w-3.5" />
+              <X className="h-3.5 w-3.5" />
             </button>
           )}
         </div>
       </div>
 
       {/* Breadcrumb */}
-      <div className="flex items-center gap-1 border-b border-border px-3 py-1.5 text-xs text-muted-foreground">
+      <div className="flex items-center gap-1 border-b border-border px-3 py-1.5 text-sm text-muted-foreground">
         {breadcrumbParts.map((part, i) => (
           <React.Fragment key={i}>
             {i > 0 && (
@@ -152,7 +147,7 @@ export default function FileManager({ onClose }: { onClose?: () => void }) {
 
       {/* Upload status */}
       {uploadStatus && (
-        <div className="border-b border-border bg-accent/20 px-3 py-1 text-xs text-muted-foreground">
+        <div className="border-b border-border bg-accent/20 px-3 py-1 text-sm text-muted-foreground">
           {uploadStatus}
         </div>
       )}
@@ -168,11 +163,11 @@ export default function FileManager({ onClose }: { onClose?: () => void }) {
         }}
       >
         {loading ? (
-          <div className="flex items-center justify-center py-8 text-xs text-muted-foreground">
+          <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
             Loading…
           </div>
         ) : error ? (
-          <div className="px-3 py-4 text-xs text-destructive">{error}</div>
+          <div className="px-3 py-4 text-sm text-destructive">{error}</div>
         ) : (
           <>
             {currentPath !== uploadDir && (
@@ -199,10 +194,10 @@ export default function FileManager({ onClose }: { onClose?: () => void }) {
                     <a
                       href={`/download?path=${encodeURIComponent(entryPath)}`}
                       target="_blank"
-                      rel="noreferrer"
+                      rel="noopener noreferrer"
                       title="Download as zip"
                       onClick={(e) => e.stopPropagation()}
-                      className="ml-1 text-xs text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground"
+                      className="ml-1 text-sm text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground"
                     >
                       <Download className="h-3.5 w-3.5" />
                     </a>
@@ -218,10 +213,11 @@ export default function FileManager({ onClose }: { onClose?: () => void }) {
                     window.open(
                       `/download?path=${encodeURIComponent(entryPath)}`,
                       "_blank",
+                      "noopener,noreferrer",
                     )
                   }
                   action={
-                    <span className="ml-1 text-[10px] text-muted-foreground opacity-50">
+                    <span className="ml-1 text-xs text-muted-foreground opacity-50">
                       {formatSize(entry.size)}
                     </span>
                   }
@@ -229,7 +225,7 @@ export default function FileManager({ onClose }: { onClose?: () => void }) {
               );
             })}
             {entries.length === 0 && (
-              <div className="flex items-center justify-center py-8 text-xs text-muted-foreground opacity-60">
+              <div className="flex items-center justify-center py-8 text-sm text-muted-foreground opacity-60">
                 Empty directory
               </div>
             )}
@@ -256,7 +252,7 @@ function FileRow({
   return (
     <div
       onClick={onClick}
-      className="group flex cursor-pointer items-center gap-2 border-b border-border/50 px-3 py-1.5 text-xs transition-colors hover:bg-accent/50"
+      className="group flex cursor-pointer items-center gap-2 border-b border-border/50 px-3 py-1.5 text-sm transition-colors hover:bg-accent/50"
     >
       <span className="flex-shrink-0">{icon}</span>
       <span className={`flex-1 truncate ${nameClass ?? ""}`}>{name}</span>

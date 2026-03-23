@@ -503,7 +503,7 @@ class TestHandleAnswerQuestion(unittest.IsolatedAsyncioTestCase):
 class TestHandleInterrupt(unittest.IsolatedAsyncioTestCase):
     """handle_interrupt cancels the task for the identified session."""
 
-    async def test_cancels_task_when_writer_matches_session_writer(self):
+    async def test_cancels_task(self):
         async def long_running():
             await asyncio.sleep(999)
 
@@ -514,28 +514,29 @@ class TestHandleInterrupt(unittest.IsolatedAsyncioTestCase):
             task=task, writer=writer, conversation_id=""
         )
         try:
-            agent.handle_interrupt({"type": "interrupt", "task_id": task_id}, writer)
+            agent.handle_interrupt({"type": "interrupt", "task_id": task_id})
             self.assertGreater(task.cancelling(), 0)
         finally:
             agent._sessions.pop(task_id, None)
             task.cancel()
 
-    async def test_does_not_cancel_when_writer_does_not_match(self):
+    async def test_cancels_even_when_writer_does_not_match(self):
+        """Interrupts arrive on a different SSH connection (different writer),
+        so handle_interrupt must NOT require writer identity."""
+
         async def long_running():
             await asyncio.sleep(999)
 
         task = asyncio.create_task(long_running())
         session_writer = MockWriter()
-        other_writer = MockWriter()
         task_id = "intr-mismatch"
         agent._sessions[task_id] = agent.Session(
             task=task, writer=session_writer, conversation_id=""
         )
         try:
-            agent.handle_interrupt(
-                {"type": "interrupt", "task_id": task_id}, other_writer
-            )
-            self.assertEqual(task.cancelling(), 0)
+            agent.handle_interrupt({"type": "interrupt", "task_id": task_id})
+            self.assertGreater(task.cancelling(), 0)
+            self.assertTrue(agent._sessions[task_id].cancelled)
         finally:
             agent._sessions.pop(task_id, None)
             task.cancel()
@@ -549,17 +550,166 @@ class TestHandleInterrupt(unittest.IsolatedAsyncioTestCase):
             task=task, writer=writer, conversation_id=""
         )
         try:
-            agent.handle_interrupt({"type": "interrupt", "task_id": task_id}, writer)
+            agent.handle_interrupt({"type": "interrupt", "task_id": task_id})
             self.assertTrue(task.done())
             self.assertFalse(task.cancelled())
         finally:
             agent._sessions.pop(task_id, None)
 
     async def test_ignores_unknown_task_id(self):
-        agent.handle_interrupt({"type": "interrupt", "task_id": "ghost"}, MockWriter())
+        agent.handle_interrupt({"type": "interrupt", "task_id": "ghost"})
 
     async def test_missing_task_id_is_no_op(self):
-        agent.handle_interrupt({"type": "interrupt"}, MockWriter())
+        agent.handle_interrupt({"type": "interrupt"})
+
+    async def test_sets_cancelled_flag_on_session(self):
+        """handle_interrupt should set session.cancelled = True."""
+
+        async def long_running():
+            await asyncio.sleep(999)
+
+        task = asyncio.create_task(long_running())
+        writer = MockWriter()
+        task_id = "intr-cancel-flag"
+        agent._sessions[task_id] = agent.Session(
+            task=task, writer=writer, conversation_id=""
+        )
+        try:
+            self.assertFalse(agent._sessions[task_id].cancelled)
+            agent.handle_interrupt({"type": "interrupt", "task_id": task_id})
+            self.assertTrue(agent._sessions[task_id].cancelled)
+        finally:
+            agent._sessions.pop(task_id, None)
+            task.cancel()
+
+    async def test_cancelled_flag_set_even_when_writer_does_not_match(self):
+        """cancelled flag should be set regardless of writer identity."""
+
+        async def long_running():
+            await asyncio.sleep(999)
+
+        task = asyncio.create_task(long_running())
+        session_writer = MockWriter()
+        task_id = "intr-cancel-mismatch"
+        agent._sessions[task_id] = agent.Session(
+            task=task, writer=session_writer, conversation_id=""
+        )
+        try:
+            agent.handle_interrupt({"type": "interrupt", "task_id": task_id})
+            self.assertTrue(agent._sessions[task_id].cancelled)
+        finally:
+            agent._sessions.pop(task_id, None)
+            task.cancel()
+
+
+class TestEmitSseCancelledSuppression(unittest.IsolatedAsyncioTestCase):
+    """emit_sse suppresses events (except done/error_event) when session is cancelled."""
+
+    async def _setup_cancelled_session(self):
+        """Helper: create a cancelled session and set context vars."""
+        writer = MockWriter()
+        task_id = "cancel-suppress"
+        task = asyncio.create_task(asyncio.sleep(999))
+        session = agent.Session(
+            task=task, writer=writer, conversation_id="", cancelled=True
+        )
+        agent._sessions[task_id] = session
+        token1 = agent._emit_writer.set(writer)
+        token2 = agent._emit_session_id.set(task_id)
+        return writer, task_id, task, token1, token2
+
+    async def _cleanup(self, task_id, task, token1, token2):
+        agent._emit_writer.reset(token1)
+        agent._emit_session_id.reset(token2)
+        agent._sessions.pop(task_id, None)
+        task.cancel()
+
+    async def test_text_delta_suppressed_when_cancelled(self):
+        writer, task_id, task, t1, t2 = await self._setup_cancelled_session()
+        try:
+            agent.emit_sse("text_delta", {"text": "should not appear"})
+            self.assertEqual(len(writer.written_events()), 0)
+        finally:
+            await self._cleanup(task_id, task, t1, t2)
+
+    async def test_thinking_delta_suppressed_when_cancelled(self):
+        writer, task_id, task, t1, t2 = await self._setup_cancelled_session()
+        try:
+            agent.emit_sse("thinking_delta", {"thinking": "nope"})
+            self.assertEqual(len(writer.written_events()), 0)
+        finally:
+            await self._cleanup(task_id, task, t1, t2)
+
+    async def test_init_suppressed_when_cancelled(self):
+        writer, task_id, task, t1, t2 = await self._setup_cancelled_session()
+        try:
+            agent.emit_sse("init", {})
+            self.assertEqual(len(writer.written_events()), 0)
+        finally:
+            await self._cleanup(task_id, task, t1, t2)
+
+    async def test_tool_start_suppressed_when_cancelled(self):
+        writer, task_id, task, t1, t2 = await self._setup_cancelled_session()
+        try:
+            agent.emit_sse("tool_start", {"id": "t1", "name": "Read", "input": {}})
+            self.assertEqual(len(writer.written_events()), 0)
+        finally:
+            await self._cleanup(task_id, task, t1, t2)
+
+    async def test_done_still_emitted_when_cancelled(self):
+        writer, task_id, task, t1, t2 = await self._setup_cancelled_session()
+        try:
+            agent.emit_sse("done", {"session_id": None, "task_id": task_id})
+            events = writer.written_events()
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0]["event"], "done")
+        finally:
+            await self._cleanup(task_id, task, t1, t2)
+
+    async def test_error_event_still_emitted_when_cancelled(self):
+        writer, task_id, task, t1, t2 = await self._setup_cancelled_session()
+        try:
+            agent.emit_sse("error_event", {"message": "err"})
+            events = writer.written_events()
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0]["event"], "error_event")
+        finally:
+            await self._cleanup(task_id, task, t1, t2)
+
+    async def test_non_cancelled_session_emits_normally(self):
+        """Events should pass through when session.cancelled is False."""
+        writer = MockWriter()
+        task_id = "cancel-not-set"
+        task = asyncio.create_task(asyncio.sleep(999))
+        agent._sessions[task_id] = agent.Session(
+            task=task, writer=writer, conversation_id="", cancelled=False
+        )
+        token1 = agent._emit_writer.set(writer)
+        token2 = agent._emit_session_id.set(task_id)
+        try:
+            agent.emit_sse("text_delta", {"text": "hello"})
+            events = writer.written_events()
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0]["data"]["text"], "hello")
+        finally:
+            agent._emit_writer.reset(token1)
+            agent._emit_session_id.reset(token2)
+            agent._sessions.pop(task_id, None)
+            task.cancel()
+
+    async def test_multiple_events_all_suppressed_except_done(self):
+        """Simulate a burst of events after cancel — only done should get through."""
+        writer, task_id, task, t1, t2 = await self._setup_cancelled_session()
+        try:
+            agent.emit_sse("text_delta", {"text": "a"})
+            agent.emit_sse("text_delta", {"text": "b"})
+            agent.emit_sse("tool_start", {"id": "t1", "name": "X", "input": {}})
+            agent.emit_sse("done", {"session_id": None, "task_id": task_id})
+            events = writer.written_events()
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0]["event"], "done")
+        finally:
+            await self._cleanup(task_id, task, t1, t2)
 
 
 class TestHandleQuery(unittest.IsolatedAsyncioTestCase):
@@ -690,6 +840,95 @@ class TestHandleQuery(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0)
         self.assertEqual(captured_args[4], subdir)
         agent._sessions.pop("wd-sub", None)
+
+
+class TestHandleQueryDuplicateTaskId(unittest.IsolatedAsyncioTestCase):
+    """handle_query cancels the old session when a duplicate task_id arrives."""
+
+    async def test_duplicate_task_id_cancels_previous_task(self):
+        async def long_running():
+            await asyncio.sleep(999)
+
+        old_task = asyncio.create_task(long_running())
+        old_writer = MockWriter()
+        task_id = "dup-task"
+        agent._sessions[task_id] = agent.Session(
+            task=old_task, writer=old_writer, conversation_id=""
+        )
+
+        new_writer = MockWriter()
+
+        async def fake_run_query(*args, **kwargs):
+            pass
+
+        with unittest.mock.patch.object(agent, "run_query", side_effect=fake_run_query):
+            agent.handle_query(
+                {"type": "query", "content": "hi", "task_id": task_id}, new_writer
+            )
+
+        try:
+            # Old task should be cancelled
+            self.assertGreater(old_task.cancelling(), 0)
+            # New session should be registered with the new writer
+            self.assertIn(task_id, agent._sessions)
+            self.assertIs(agent._sessions[task_id].writer, new_writer)
+        finally:
+            agent._sessions.pop(task_id, None)
+            old_task.cancel()
+
+    async def test_duplicate_task_id_sets_cancelled_flag_on_old_session(self):
+        async def long_running():
+            await asyncio.sleep(999)
+
+        old_task = asyncio.create_task(long_running())
+        old_writer = MockWriter()
+        task_id = "dup-flag"
+        old_session = agent.Session(
+            task=old_task, writer=old_writer, conversation_id=""
+        )
+        agent._sessions[task_id] = old_session
+
+        new_writer = MockWriter()
+
+        async def fake_run_query(*args, **kwargs):
+            pass
+
+        with unittest.mock.patch.object(agent, "run_query", side_effect=fake_run_query):
+            agent.handle_query(
+                {"type": "query", "content": "hi", "task_id": task_id}, new_writer
+            )
+
+        try:
+            self.assertTrue(old_session.cancelled)
+        finally:
+            agent._sessions.pop(task_id, None)
+            old_task.cancel()
+
+    async def test_duplicate_task_id_with_done_task_does_not_error(self):
+        """If the old task already completed, handle_query should still succeed."""
+        done_task = asyncio.create_task(asyncio.sleep(0))
+        await done_task
+        old_writer = MockWriter()
+        task_id = "dup-done"
+        agent._sessions[task_id] = agent.Session(
+            task=done_task, writer=old_writer, conversation_id=""
+        )
+
+        new_writer = MockWriter()
+
+        async def fake_run_query(*args, **kwargs):
+            pass
+
+        with unittest.mock.patch.object(agent, "run_query", side_effect=fake_run_query):
+            agent.handle_query(
+                {"type": "query", "content": "hi", "task_id": task_id}, new_writer
+            )
+
+        try:
+            self.assertIn(task_id, agent._sessions)
+            self.assertIs(agent._sessions[task_id].writer, new_writer)
+        finally:
+            agent._sessions.pop(task_id, None)
 
 
 # ── Stream event processing tests ─────────────────────────────────────────
@@ -1961,6 +2200,302 @@ class TestAskUserQuestionHook(unittest.IsolatedAsyncioTestCase):
             e for e in writer.written_events() if e["event"] == "ask_user_question"
         ]
         self.assertEqual(aq_events, [])
+
+    async def test_hook_raises_timeout_error_when_no_answer_arrives(self):
+        """If nobody answers within QUESTION_TIMEOUT_SECS, the hook must raise
+        asyncio.TimeoutError rather than hanging forever."""
+        task_id = "aq-timeout"
+        writer = MockWriter()
+        hook_errors = []
+
+        # Temporarily set a very short timeout so the test doesn't take 3600s
+        original_timeout = agent.QUESTION_TIMEOUT_SECS
+        agent.QUESTION_TIMEOUT_SECS = 0.05  # 50ms
+
+        async def call_hook(hook):
+            try:
+                await hook({"tool_input": {"questions": []}}, "req-to", None)
+            except asyncio.TimeoutError:
+                hook_errors.append("timeout")
+
+        try:
+            await self._run_with_hook(task_id, writer, call_hook)
+        finally:
+            agent.QUESTION_TIMEOUT_SECS = original_timeout
+
+        self.assertEqual(hook_errors, ["timeout"])
+
+    async def test_hook_clears_pending_state_on_timeout(self):
+        """After a timeout, pending_question and pending_question_data must be
+        cleared so the session doesn't hold stale references."""
+        task_id = "aq-timeout-cleanup"
+        writer = MockWriter()
+
+        original_timeout = agent.QUESTION_TIMEOUT_SECS
+        agent.QUESTION_TIMEOUT_SECS = 0.05
+
+        session_ref = [None]
+
+        async def call_hook(hook):
+            try:
+                await hook({"tool_input": {"questions": []}}, "req-tc", None)
+            except asyncio.TimeoutError:
+                session_ref[0] = agent._sessions.get(task_id)
+
+        try:
+            await self._run_with_hook(task_id, writer, call_hook)
+        finally:
+            agent.QUESTION_TIMEOUT_SECS = original_timeout
+
+        # The session may have been popped by run_query's finally block,
+        # but if we captured it during the hook, pending state should be None
+        if session_ref[0] is not None:
+            self.assertIsNone(session_ref[0].pending_question)
+            self.assertIsNone(session_ref[0].pending_question_data)
+
+
+# ── handle_connection cleanup tests ───────────────────────────────────────
+
+
+class _AsyncMockWriter(MockWriter):
+    """MockWriter extended with close() and wait_closed() tracking."""
+
+    def __init__(self, closing: bool = False):
+        super().__init__(closing)
+        self.close_called = False
+        self.wait_closed_called = False
+
+    def close(self):
+        self.close_called = True
+
+    async def wait_closed(self):
+        self.wait_closed_called = True
+
+
+class TestHandleConnection(unittest.IsolatedAsyncioTestCase):
+    """handle_connection calls writer.close() and writer.wait_closed() in all cases."""
+
+    async def test_cleanup_on_normal_route(self):
+        """writer.close() and writer.wait_closed() are called after normal completion."""
+        reader = asyncio.StreamReader()
+        reader.feed_eof()
+        writer = _AsyncMockWriter()
+        await agent.handle_connection(reader, writer)
+        self.assertTrue(writer.close_called)
+        self.assertTrue(writer.wait_closed_called)
+
+    async def test_cleanup_when_route_connection_raises(self):
+        """writer.close() and writer.wait_closed() are called even when route_connection raises."""
+        reader = asyncio.StreamReader()
+        reader.feed_eof()
+        writer = _AsyncMockWriter()
+        with unittest.mock.patch.object(
+            agent, "route_connection", side_effect=RuntimeError("boom")
+        ):
+            with self.assertRaises(RuntimeError):
+                await agent.handle_connection(reader, writer)
+        self.assertTrue(writer.close_called)
+        self.assertTrue(writer.wait_closed_called)
+
+    async def test_logs_connected_and_disconnected(self):
+        """handle_connection logs client connected / disconnected messages."""
+        reader = asyncio.StreamReader()
+        reader.feed_eof()
+        writer = _AsyncMockWriter()
+        with unittest.mock.patch.object(agent, "log") as mock_log:
+            await agent.handle_connection(reader, writer)
+        messages = [call.args[0] for call in mock_log.call_args_list]
+        self.assertTrue(
+            any("connected" in m for m in messages),
+            f"expected 'connected' log, got: {messages}",
+        )
+        self.assertTrue(
+            any("disconnected" in m for m in messages),
+            f"expected 'disconnected' log, got: {messages}",
+        )
+
+
+# ── _log_drain_error callback tests ──────────────────────────────────────
+
+
+class TestLogDrainError(unittest.IsolatedAsyncioTestCase):
+    """_log_drain_error logs only when the task ended with an exception."""
+
+    async def test_logs_when_task_has_exception(self):
+        async def fail():
+            raise ValueError("drain broke")
+
+        task = asyncio.create_task(fail())
+        try:
+            await task
+        except ValueError:
+            pass
+        with unittest.mock.patch.object(agent, "log") as mock_log:
+            agent._log_drain_error(task)
+        mock_log.assert_called_once()
+        self.assertIn("drain", mock_log.call_args[0][0])
+
+    async def test_does_nothing_when_task_is_cancelled(self):
+        async def wait():
+            await asyncio.sleep(999)
+
+        task = asyncio.create_task(wait())
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        with unittest.mock.patch.object(agent, "log") as mock_log:
+            agent._log_drain_error(task)
+        mock_log.assert_not_called()
+
+    async def test_does_nothing_when_task_completed_successfully(self):
+        async def succeed():
+            return 42
+
+        task = asyncio.create_task(succeed())
+        await task
+        with unittest.mock.patch.object(agent, "log") as mock_log:
+            agent._log_drain_error(task)
+        mock_log.assert_not_called()
+
+
+# ── ask_user_question_hook with non-dict tool_input ──────────────────────
+
+
+class TestAskUserQuestionHookNonDictInput(unittest.IsolatedAsyncioTestCase):
+    """When tool_input is not a dict, ask_user_question_hook falls back to [] for questions."""
+
+    async def _run_with_hook(self, task_id, writer, hook_caller):
+        """Same pattern as TestAskUserQuestionHook._run_with_hook."""
+
+        class HookMatcher:
+            def __init__(self, matcher, hooks, timeout):
+                self.matcher = matcher
+                self.hooks = hooks
+                self.timeout = timeout
+
+        class ClaudeAgentOptions:
+            def __init__(self, **kwargs):
+                self.hooks = kwargs.get("hooks", {})
+
+        caller = hook_caller
+
+        async def mock_query(prompt, options):
+            hook = None
+            for hm in options.hooks.get("PreToolUse", []):
+                if hm.matcher == "AskUserQuestion":
+                    hook = hm.hooks[0]
+            if hook is not None:
+                await caller(hook)
+            if False:
+                yield
+
+        mod = types.ModuleType("claude_agent_sdk")
+        types_mod = types.ModuleType("claude_agent_sdk.types")
+        mod.ClaudeAgentOptions = ClaudeAgentOptions
+        mod.PermissionResultAllow = object
+        mod.query = mock_query
+        types_mod.HookMatcher = HookMatcher
+        types_mod.StreamEvent = _StreamEvent
+
+        old_mods = {
+            k: sys.modules.get(k)
+            for k in ("claude_agent_sdk", "claude_agent_sdk.types")
+        }
+        sys.modules["claude_agent_sdk"] = mod
+        sys.modules["claude_agent_sdk.types"] = types_mod
+
+        agent._sessions[task_id] = agent.Session(
+            task=asyncio.current_task(), writer=writer, conversation_id=""
+        )
+        token1 = agent._emit_writer.set(writer)
+        token2 = agent._emit_session_id.set(task_id)
+        try:
+            await agent.run_query("test", None, task_id, "", "/root")
+        finally:
+            _restore_sdk_mock(old_mods)
+            agent._emit_writer.reset(token1)
+            agent._emit_session_id.reset(token2)
+            agent._sessions.pop(task_id, None)
+
+        return writer.written_events()
+
+    async def test_string_tool_input_falls_back_to_empty_questions(self):
+        """When tool_input is a string, questions should default to []."""
+        task_id = "aq-nondict-str"
+        writer = MockWriter()
+
+        async def call_hook(hook):
+            async def resolve():
+                agent.handle_answer_question(
+                    {"type": "answer_question", "request_id": "req-nd", "answers": {}}
+                )
+
+            asyncio.create_task(resolve())
+            await hook({"tool_input": "not a dict"}, "req-nd", None)
+
+        events = await self._run_with_hook(task_id, writer, call_hook)
+        aq_events = [e for e in events if e["event"] == "ask_user_question"]
+        self.assertEqual(len(aq_events), 1)
+        self.assertEqual(aq_events[0]["data"]["questions"], [])
+
+    async def test_none_tool_input_falls_back_to_empty_questions(self):
+        """When tool_input is None (get_field returns {}), questions should default to []."""
+        task_id = "aq-nondict-none"
+        writer = MockWriter()
+
+        async def call_hook(hook):
+            async def resolve():
+                agent.handle_answer_question(
+                    {"type": "answer_question", "request_id": "req-nn", "answers": {}}
+                )
+
+            asyncio.create_task(resolve())
+            # input_data has no tool_input key at all, so get_field returns {} fallback
+            await hook({}, "req-nn", None)
+
+        events = await self._run_with_hook(task_id, writer, call_hook)
+        aq_events = [e for e in events if e["event"] == "ask_user_question"]
+        self.assertEqual(len(aq_events), 1)
+        self.assertEqual(aq_events[0]["data"]["questions"], [])
+
+
+# ── build_prompt_stream tests ─────────────────────────────────────────────
+
+
+class TestBuildPromptStream(unittest.IsolatedAsyncioTestCase):
+    """build_prompt_stream yields exactly one dict with the expected shape."""
+
+    async def test_yields_exactly_one_dict(self):
+        items = []
+        async for item in agent.build_prompt_stream("hello world"):
+            items.append(item)
+        self.assertEqual(len(items), 1)
+
+    async def test_yielded_dict_has_expected_shape(self):
+        items = []
+        async for item in agent.build_prompt_stream("hello world"):
+            items.append(item)
+        d = items[0]
+        self.assertEqual(d["type"], "user")
+        self.assertEqual(d["session_id"], "")
+        self.assertIsNone(d["parent_tool_use_id"])
+        self.assertEqual(d["message"]["role"], "user")
+        self.assertEqual(d["message"]["content"], "hello world")
+
+    async def test_user_message_content_matches_input(self):
+        content = "test prompt with special chars: <>&"
+        items = []
+        async for item in agent.build_prompt_stream(content):
+            items.append(item)
+        self.assertEqual(items[0]["message"]["content"], content)
+
+    async def test_empty_content_string(self):
+        items = []
+        async for item in agent.build_prompt_stream(""):
+            items.append(item)
+        self.assertEqual(items[0]["message"]["content"], "")
 
 
 if __name__ == "__main__":

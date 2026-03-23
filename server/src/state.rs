@@ -48,6 +48,23 @@ pub(crate) struct AppConfig {
     pub(crate) cognito_region: String,
     #[serde(default)]
     pub(crate) cognito_user_pool_id: String,
+    #[serde(default)]
+    pub(crate) gateway_cognito_client_id: String,
+    #[serde(default)]
+    pub(crate) gateway_cognito_client_secret: String,
+    #[serde(default)]
+    pub(crate) gateway_cognito_domain: String,
+    #[serde(default)]
+    pub(crate) gateway_cognito_redirect_uri: String,
+    #[serde(default)]
+    pub(crate) gateway_cognito_region: String,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub(crate) gateway_cognito_user_pool_id: String,
+    #[serde(default)]
+    pub(crate) gateway_api_url: String,
+    #[serde(default)]
+    pub(crate) gateway_identity_provider: String,
     #[serde(default = "default_user_rootfs_dir")]
     pub(crate) user_rootfs_dir: PathBuf,
     #[serde(default = "default_upload_dir")]
@@ -78,6 +95,8 @@ pub(crate) struct AppConfig {
     pub(crate) iam_role_name: String,
     #[serde(default)]
     pub(crate) anthropic_base_url: Option<String>,
+    #[serde(default)]
+    pub(crate) enable_mcp: bool,
     #[serde(default = "default_anthropic_default_haiku_model")]
     pub(crate) anthropic_default_haiku_model: String,
     #[serde(default = "default_anthropic_default_sonnet_model")]

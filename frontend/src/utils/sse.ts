@@ -10,6 +10,59 @@ import type {
   SseToolResult,
   SseToolStart,
 } from "../types";
+import { safeJsonParse } from "./safeJson";
+
+/** Lightweight runtime check that an unknown value has the expected string/object fields. */
+function hasFields(
+  obj: unknown,
+  fields: string[],
+): obj is Record<string, unknown> {
+  if (typeof obj !== "object" || obj === null) return false;
+  const rec = obj as Record<string, unknown>;
+  return fields.every((f) => f in rec);
+}
+
+/** Validate and cast an SSE payload for a given event type.  Returns null if
+ *  the payload doesn't have the required discriminating fields. */
+function validatePayload(eventName: string, payload: unknown): SseEvent | null {
+  switch (eventName) {
+    case "task_created":
+      if (!hasFields(payload, ["task_id", "conversation_id"])) return null;
+      return { type: "task_created", payload: payload as SseTaskCreated };
+    case "session_start":
+      if (!hasFields(payload, ["task_id"])) return null;
+      return { type: "session_start", payload: payload as SseSessionStart };
+    case "init":
+      return { type: "init" };
+    case "text_delta":
+      if (!hasFields(payload, ["text"])) return null;
+      return { type: "text_delta", payload: payload as SseTextDelta };
+    case "thinking_delta":
+      if (!hasFields(payload, ["thinking"])) return null;
+      return { type: "thinking_delta", payload: payload as SseThinkingDelta };
+    case "tool_start":
+      if (!hasFields(payload, ["id", "name"])) return null;
+      return { type: "tool_start", payload: payload as SseToolStart };
+    case "ask_user_question":
+      if (!hasFields(payload, ["request_id", "task_id", "questions"]))
+        return null;
+      return {
+        type: "ask_user_question",
+        payload: payload as SseAskUserQuestion,
+      };
+    case "tool_result":
+      if (!hasFields(payload, ["tool_use_id", "content"])) return null;
+      return { type: "tool_result", payload: payload as SseToolResult };
+    case "done":
+      if (!hasFields(payload, ["task_id", "conversation_id"])) return null;
+      return { type: "done", payload: payload as SseDone };
+    case "error_event":
+      if (!hasFields(payload, ["message"])) return null;
+      return { type: "error_event", payload: payload as SseErrorEvent };
+    default:
+      return null;
+  }
+}
 
 export function parseSseBlock(
   part: string,
@@ -34,49 +87,41 @@ export function dispatchSseEvent(
 ): void {
   let payload: unknown;
   try {
-    payload = JSON.parse(data);
-  } catch {
+    payload = safeJsonParse(data);
+  } catch (e) {
+    console.warn("Failed to parse SSE data as JSON", e);
     return;
   }
   switch (eventName) {
     case "task_created":
-      pushEvent({ type: "task_created", payload: payload as SseTaskCreated });
-      break;
     case "session_start":
-      pushEvent({ type: "session_start", payload: payload as SseSessionStart });
+    case "text_delta":
+    case "thinking_delta":
+    case "tool_start":
+    case "ask_user_question":
+    case "tool_result": {
+      const event = validatePayload(eventName, payload);
+      if (event) pushEvent(event);
       break;
-    case "init":
+    }
+    case "init": {
       pushEvent({ type: "init" });
       break;
-    case "text_delta":
-      pushEvent({ type: "text_delta", payload: payload as SseTextDelta });
-      break;
-    case "thinking_delta":
-      pushEvent({
-        type: "thinking_delta",
-        payload: payload as SseThinkingDelta,
-      });
-      break;
-    case "tool_start":
-      pushEvent({ type: "tool_start", payload: payload as SseToolStart });
-      break;
-    case "ask_user_question":
-      pushEvent({
-        type: "ask_user_question",
-        payload: payload as SseAskUserQuestion,
-      });
-      break;
-    case "tool_result":
-      pushEvent({ type: "tool_result", payload: payload as SseToolResult });
-      break;
-    case "done":
+    }
+    case "done": {
+      const event = validatePayload(eventName, payload);
+      if (!event) return;
       localStorage.removeItem(`chat_running_task_${vmId}`);
-      pushEvent({ type: "done", payload: payload as SseDone });
+      pushEvent(event);
       break;
-    case "error_event":
+    }
+    case "error_event": {
+      const event = validatePayload(eventName, payload);
+      if (!event) return;
       localStorage.removeItem(`chat_running_task_${vmId}`);
-      pushEvent({ type: "error_event", payload: payload as SseErrorEvent });
+      pushEvent(event);
       break;
+    }
   }
 }
 
@@ -119,61 +164,61 @@ export function attachEventSourceListeners(
   };
   const safeParse = (raw: string): unknown => {
     try {
-      return JSON.parse(raw);
+      return safeJsonParse(raw);
     } catch {
       return undefined;
     }
   };
   add("task_created", (e) => {
     const p = safeParse(e.data);
-    if (p !== undefined)
-      pushEvent({ type: "task_created", payload: p as SseTaskCreated });
+    const event = p !== undefined ? validatePayload("task_created", p) : null;
+    if (event) pushEvent(event);
   });
   add("session_start", (e) => {
     const p = safeParse(e.data);
-    if (p !== undefined)
-      pushEvent({ type: "session_start", payload: p as SseSessionStart });
+    const event = p !== undefined ? validatePayload("session_start", p) : null;
+    if (event) pushEvent(event);
   });
   add("init", () => pushEvent({ type: "init" }));
   add("text_delta", (e) => {
     const p = safeParse(e.data);
-    if (p !== undefined)
-      pushEvent({ type: "text_delta", payload: p as SseTextDelta });
+    const event = p !== undefined ? validatePayload("text_delta", p) : null;
+    if (event) pushEvent(event);
   });
   add("thinking_delta", (e) => {
     const p = safeParse(e.data);
-    if (p !== undefined)
-      pushEvent({ type: "thinking_delta", payload: p as SseThinkingDelta });
+    const event = p !== undefined ? validatePayload("thinking_delta", p) : null;
+    if (event) pushEvent(event);
   });
   add("tool_start", (e) => {
     const p = safeParse(e.data);
-    if (p !== undefined)
-      pushEvent({ type: "tool_start", payload: p as SseToolStart });
+    const event = p !== undefined ? validatePayload("tool_start", p) : null;
+    if (event) pushEvent(event);
   });
   add("ask_user_question", (e) => {
     const p = safeParse(e.data);
-    if (p !== undefined)
-      pushEvent({
-        type: "ask_user_question",
-        payload: p as SseAskUserQuestion,
-      });
+    const event =
+      p !== undefined ? validatePayload("ask_user_question", p) : null;
+    if (event) pushEvent(event);
   });
   add("tool_result", (e) => {
     const p = safeParse(e.data);
-    if (p !== undefined)
-      pushEvent({ type: "tool_result", payload: p as SseToolResult });
+    const event = p !== undefined ? validatePayload("tool_result", p) : null;
+    if (event) pushEvent(event);
   });
   add("done", (e) => {
     const p = safeParse(e.data);
-    if (p === undefined) return;
+    const event = p !== undefined ? validatePayload("done", p) : null;
+    if (!event) return;
     localStorage.removeItem(`chat_running_task_${vmId}`);
-    pushEvent({ type: "done", payload: p as SseDone });
+    pushEvent(event);
   });
   add("error_event", (e) => {
     const p = safeParse(e.data);
-    if (p === undefined) return;
+    const event = p !== undefined ? validatePayload("error_event", p) : null;
+    if (!event) return;
     localStorage.removeItem(`chat_running_task_${vmId}`);
-    pushEvent({ type: "error_event", payload: p as SseErrorEvent });
+    pushEvent(event);
   });
   es.onerror = () => {
     es.close();

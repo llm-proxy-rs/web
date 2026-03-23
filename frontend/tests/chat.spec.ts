@@ -1,5 +1,5 @@
 /**
- * UF-01  Blank new chat      — "Start a new conversation" shown when no conversations
+ * UF-01  Blank new chat      — "Welcome back" shown when no conversations
  * UF-02  Send message        — user bubble + status bar appear
  * UF-03  Receive response    — assistant message shown, status bar gone, conversation in sidebar
  * UF-04  New Chat button     — clears to blank state
@@ -8,23 +8,35 @@
  * UF-60  Second new chat     — can create a second new chat after the first
  */
 import { test, expect } from "@playwright/test";
-import { setupApp, sendMessage, makeSession, makeConversation, sse } from "./helpers/setup";
+import {
+  setupApp,
+  sendMessage,
+  makeSession,
+  makeConversation,
+  sse,
+} from "./helpers/setup";
 
 test.describe("chat", () => {
-  test("UF-01 blank state shown on load with no conversations", async ({ page }) => {
+  test("UF-01 blank state shown on load with no conversations", async ({
+    page,
+  }) => {
     await setupApp(page, {});
 
-    await expect(page.getByText("Start a new conversation")).toBeVisible();
+    await expect(page.getByText("Welcome back")).toBeVisible();
     await expect(page.getByText("No conversations yet")).toBeVisible();
   });
 
-  test("UF-02 sending a message shows user bubble and streaming status bar", async ({ page }) => {
+  test("UF-02 sending a message shows user bubble and streaming status bar", async ({
+    page,
+  }) => {
     await setupApp(page, {});
 
     await sendMessage(page, "Hello Claude");
 
     // User's message bubble is immediately visible
-    await expect(page.getByRole("main").getByText("Hello Claude")).toBeVisible();
+    await expect(
+      page.getByRole("main").getByText("Hello Claude"),
+    ).toBeVisible();
 
     // ClaudeStatus bar appears while streaming (has role=status)
     await expect(page.getByRole("status")).toBeVisible();
@@ -45,7 +57,9 @@ test.describe("chat", () => {
     await expect(page.getByText("Hello! How can I help?")).toBeVisible();
     await expect(page.getByRole("status")).not.toBeVisible();
     // Conversation title "Hi" appears in the sidebar
-    await expect(page.locator("span.truncate").filter({ hasText: /^Hi$/ })).toBeVisible();
+    await expect(
+      page.locator("span.truncate").filter({ hasText: /^Hi$/ }),
+    ).toBeVisible();
   });
 
   test("UF-04 New Chat button resets to blank state", async ({ page }) => {
@@ -58,7 +72,7 @@ test.describe("chat", () => {
     // Now click New Chat
     await page.getByRole("button", { name: "New Chat" }).click();
 
-    await expect(page.getByText("Start a new conversation")).toBeVisible();
+    await expect(page.getByText("Welcome back")).toBeVisible();
     // No conversation highlighted in sidebar
     const activeRow = page.locator(".border-l-2.border-primary");
     await expect(activeRow).not.toBeVisible();
@@ -80,36 +94,50 @@ test.describe("chat", () => {
     ctrl.sendSseEvents(sse.text("Hi!", "sess-2"));
 
     // 4. The chat should remain blank — not navigated to the completed conversation
-    await expect(page.getByText("Start a new conversation")).toBeVisible();
+    await expect(page.getByText("Welcome back")).toBeVisible();
   });
 
-  test("UF-59 sidebar shows first user message as title immediately after sending", async ({ page }) => {
+  test("UF-59 sidebar shows first user message as title immediately after sending", async ({
+    page,
+  }) => {
     await setupApp(page, {});
 
     await sendMessage(page, "Tell me about cattle ranching");
 
     // Title appears in the sidebar immediately — before any SSE events arrive
-    await expect(page.locator("span.truncate").filter({ hasText: "Tell me about cattle ranching" })).toBeVisible();
+    await expect(
+      page
+        .locator("span.truncate")
+        .filter({ hasText: "Tell me about cattle ranching" }),
+    ).toBeVisible();
   });
 
-  test("UF-60 can create a second new chat after the first", async ({ page }) => {
+  test("UF-60 can create a second new chat after the first", async ({
+    page,
+  }) => {
     const ctrl = await setupApp(page, {});
 
     // Create first chat and complete its stream
     await sendMessage(page, "First message");
-    ctrl.setSessions([makeSession({ session_id: "sess-1", title: "First message" })]);
+    ctrl.setSessions([
+      makeSession({ session_id: "sess-1", title: "First message" }),
+    ]);
     ctrl.sendSseEvents(sse.text("Response 1", "sess-1"));
     await expect(page.getByRole("status")).not.toBeVisible();
 
     // Click New Chat and send a second message
     await page.getByRole("button", { name: "New Chat" }).click();
-    await expect(page.getByText("Start a new conversation")).toBeVisible();
+    await expect(page.getByText("Welcome back")).toBeVisible();
 
     await sendMessage(page, "Second message");
 
     // Second conversation is created as a separate entry in the sidebar
-    await expect(page.locator("span.truncate").filter({ hasText: "Second message" })).toBeVisible();
+    await expect(
+      page.locator("span.truncate").filter({ hasText: "Second message" }),
+    ).toBeVisible();
     // The first conversation is still in the sidebar
-    await expect(page.locator("span.truncate").filter({ hasText: "First message" })).toBeVisible();
+    await expect(
+      page.locator("span.truncate").filter({ hasText: "First message" }),
+    ).toBeVisible();
   });
 });

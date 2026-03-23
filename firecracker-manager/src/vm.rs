@@ -29,7 +29,7 @@ static VM_NET_INDICES: Mutex<BTreeSet<u8>> = Mutex::new(BTreeSet::new());
 fn acquire_net_idx() -> Result<Option<u8>> {
     let mut used = VM_NET_INDICES
         .lock()
-        .map_err(|e| anyhow::anyhow!("VM network index lock poisoned: {e}"))?;
+        .map_err(|_| anyhow::anyhow!("VM network index lock poisoned"))?;
     let idx = (0..254u8).find(|i| !used.contains(i));
     if let Some(i) = idx {
         used.insert(i);
@@ -42,7 +42,7 @@ fn release_net_idx(idx: u8) {
         Ok(mut used) => {
             used.remove(&idx);
         }
-        Err(e) => warn!("VM network index lock poisoned on release: {e}"),
+        Err(_) => warn!("VM network index lock poisoned on release"),
     }
 }
 
@@ -115,16 +115,16 @@ impl Drop for Vm {
 }
 
 async fn stop_vm(socket_path: &Path, pid: u32) {
-    if let Err(e) = stop_instance(socket_path).await {
-        warn!("failed to stop VM instance gracefully: {e}");
+    if stop_instance(socket_path).await.is_err() {
+        warn!("failed to stop VM instance gracefully");
     }
     if tokio::time::timeout(Duration::from_secs(10), wait_for_process_exit(pid))
         .await
         .is_err()
         && let Ok(raw_pid) = i32::try_from(pid)
-        && let Err(e) = kill(Pid::from_raw(raw_pid), Signal::SIGKILL)
+        && let Err(_) = kill(Pid::from_raw(raw_pid), Signal::SIGKILL)
     {
-        warn!("failed to SIGKILL process {pid}: {e}");
+        warn!("failed to SIGKILL process {pid}");
     }
 }
 
@@ -160,7 +160,7 @@ async fn launch_vm(
     create_tap(
         &vm_config.net_helper_path,
         tap_name,
-        &format_tap_ip(net_idx),
+        &format_tap_ip(net_idx)?,
     )
     .await?;
     let mac = format_guest_mac(net_idx);

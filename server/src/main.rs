@@ -3,6 +3,8 @@ mod chat;
 mod csrf;
 mod download;
 mod files;
+mod gateway_auth;
+mod gateway_callback;
 mod handlers;
 mod settings;
 mod state;
@@ -39,14 +41,16 @@ use crate::{
     csrf::csrf_middleware,
     download::download_file_handler,
     files::list_files_handler,
+    gateway_auth::renew_gateway_key_handler,
+    gateway_callback::gateway_callback_handler,
     handlers::{
         delete_chat_session_handler, delete_user_rootfs_handler, get_chat_transcript_handler,
         get_csrf_token_handler, get_or_create_terminal, get_terminal_page, handle_chat_upload,
-        list_chat_sessions_handler,
+        list_chat_sessions_handler, vm_status_handler,
     },
     settings::{get_settings_handler, put_settings_handler},
     state::{AppState, load_config},
-    static_files::{load_static_assets, serve_app_js, serve_styles_css},
+    static_files::{load_static_assets, serve_app_js, serve_font, serve_styles_css},
     terminal::handle_ws_upgrade,
     upload::upload_file_handler,
 };
@@ -77,7 +81,7 @@ async fn main() -> Result<()> {
         &app_state.config.jailer_chroot_base,
     )
     .await;
-    setup_host_networking(&app_state.config.net_helper_path).await;
+    setup_host_networking(&app_state.config.net_helper_path).await?;
     let mmds_refresh_abort_handle = if app_state.config.use_iam_creds {
         Some(spawn_mmds_refresh_task(app_state.clone()).abort_handle())
     } else {
@@ -124,16 +128,20 @@ fn build_router(app_state: AppState, session_store: PostgresStore) -> Router {
             "/api/settings",
             get(get_settings_handler).put(put_settings_handler),
         )
+        .route("/api/vm-status", get(vm_status_handler))
         .route("/api/csrf-token", get(get_csrf_token_handler))
         .route("/rootfs/delete", post(delete_user_rootfs_handler))
         .route("/terminal/{id}", get(get_terminal_page))
         .route("/ws/{id}", get(handle_ws_upgrade))
         .route("/login", get(get_login_handler))
         .route("/login/cognito", get(get_cognito_login_handler))
-        .route("/logout", get(get_logout_handler))
+        .route("/logout", post(get_logout_handler))
         .route("/callback", get(get_callback_handler))
+        .route("/callback/gateway", get(gateway_callback_handler))
+        .route("/api/renew-gateway-key", post(renew_gateway_key_handler))
         .route("/static/app.js", get(serve_app_js))
         .route("/static/styles.css", get(serve_styles_css))
+        .route("/static/fonts/{filename}", get(serve_font))
         .with_state(app_state)
         .layer(middleware::from_fn(csrf_middleware))
         .layer(session_layer)
@@ -143,6 +151,7 @@ fn build_router(app_state: AppState, session_store: PostgresStore) -> Router {
 fn build_session_layer(session_store: PostgresStore) -> SessionManagerLayer<PostgresStore> {
     SessionManagerLayer::new(session_store)
         .with_secure(true)
+        .with_http_only(true)
         .with_same_site(SameSite::Lax)
         .with_expiry(Expiry::OnInactivity(Duration::seconds(86400)))
 }
@@ -160,14 +169,18 @@ async fn add_security_headers(request: Request, next: Next) -> Response {
         HeaderValue::from_static("strict-origin-when-cross-origin"),
     );
     headers.insert(
+        "strict-transport-security",
+        HeaderValue::from_static("max-age=31536000; includeSubDomains"),
+    );
+    headers.insert(
         "content-security-policy",
         HeaderValue::from_static(
             "default-src 'self'; \
              script-src 'self'; \
-             style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; \
-             connect-src 'self'; \
-             img-src 'self' data:; \
-             font-src 'self' data: https://fonts.gstatic.com",
+             style-src 'self' 'unsafe-inline'; \
+             connect-src 'self' wss:; \
+             img-src 'self' data: blob:; \
+             font-src 'self'",
         ),
     );
     response
@@ -207,7 +220,7 @@ async fn serve_router(
         &app_state.config.user_rootfs_dir,
         &app_state.rootfs_lock,
     )
-    .await;
+    .await?;
     Ok(())
 }
 
@@ -228,12 +241,16 @@ fn spawn_mmds_refresh_task(app_state: AppState) -> tokio::task::JoinHandle<()> {
         interval.tick().await;
         loop {
             interval.tick().await;
-            refresh_all_vm_mmds(
+            if refresh_all_vm_mmds(
                 &app_state.vms,
                 app_state.config.use_iam_creds,
                 &app_state.config.iam_role_name,
             )
-            .await;
+            .await
+            .is_err()
+            {
+                tracing::error!("mmds refresh failed");
+            }
         }
     })
 }
@@ -246,7 +263,7 @@ async fn shutdown_signal(
     let ctrl_c = async {
         signal::ctrl_c()
             .await
-            .unwrap_or_else(|e| tracing::error!("failed to install Ctrl+C handler: {e}"));
+            .unwrap_or_else(|_| tracing::error!("failed to install Ctrl+C handler"));
     };
     let terminate = async {
         let Ok(mut sig) = signal::unix::signal(signal::unix::SignalKind::terminate()) else {

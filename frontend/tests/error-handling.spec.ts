@@ -1,17 +1,22 @@
 /**
- * UF-60  sendQuery network error   — POST /chat 503 adds an error message in chat and clears status bar
+ * UF-60  sendQuery network error   — POST /chat 500 adds an error message in chat and clears status bar
  * UF-61  answerQuestion network error — POST /chat-question-answer 500 dismisses the panel; no crash
+ * UF-62  POST /chat 503 (VM starting) — silently ignored, no error in chat
  */
 import { test, expect } from "@playwright/test";
 import { setupApp, sendMessage, sse } from "./helpers/setup";
 
 test.describe("error-handling", () => {
-  test("UF-60 POST /chat 503 adds error message in chat and clears status bar", async ({
+  test("UF-60 POST /chat 500 adds error message in chat and clears status bar", async ({
     page,
   }) => {
-    const ctrl = await setupApp(page, { sessions: [], chatError: "relay not available" });
+    const ctrl = await setupApp(page, {
+      sessions: [],
+      chatError: "relay not available",
+      chatErrorStatus: 500,
+    });
 
-    // The /chat route returns 503; sendQuery throws; handleSend catch adds a type:"error" message
+    // The /chat route returns 500; sendQuery throws; handleSend catch adds a type:"error" message
     await sendMessage(page, "Hello");
 
     // The error content is String(err) = "Error: relay not available"
@@ -21,7 +26,9 @@ test.describe("error-handling", () => {
     await expect(page.getByRole("status")).not.toBeVisible();
 
     // Composer is re-enabled (isLoading is false)
-    await expect(page.locator('textarea[placeholder="Message Claude…"]')).toBeEnabled();
+    await expect(
+      page.locator('textarea[placeholder="Message Claude…"]'),
+    ).toBeEnabled();
 
     // No SSE events needed — the error was purely from the HTTP layer
     void ctrl;
@@ -30,7 +37,10 @@ test.describe("error-handling", () => {
   test("UF-61 POST /chat-question-answer 500 dismisses the panel without crashing", async ({
     page,
   }) => {
-    const ctrl = await setupApp(page, { sessions: [], answerError: "internal error" });
+    const ctrl = await setupApp(page, {
+      sessions: [],
+      answerError: "internal error",
+    });
 
     await sendMessage(page, "Help me choose");
     ctrl.sendSseEvents(
@@ -57,5 +67,27 @@ test.describe("error-handling", () => {
 
     // No error message in chat (the error is not caught and rendered — it is swallowed)
     await expect(page.getByText("Error:")).not.toBeVisible();
+  });
+
+  test("UF-62 POST /chat 503 (VM starting) is silently ignored", async ({
+    page,
+  }) => {
+    const ctrl = await setupApp(page, {
+      sessions: [],
+      chatError: "VM is still starting, please try again",
+      chatErrorStatus: 503,
+    });
+
+    await sendMessage(page, "Hello");
+
+    // Wait a tick for any potential error rendering
+    await page.waitForTimeout(500);
+
+    // No error message should appear in the chat — 503 is silently swallowed
+    await expect(
+      page.locator('[data-testid="message-error"]'),
+    ).not.toBeVisible();
+
+    void ctrl;
   });
 });

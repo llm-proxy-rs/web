@@ -8,8 +8,14 @@ import { test, expect } from "@playwright/test";
 import { setupApp, makeConversation, makeSession } from "./helpers/setup";
 
 test.describe("session", () => {
-  test("UF-11 clicking a conversation in the sidebar loads its transcript", async ({ page }) => {
-    const conversation = makeConversation({ sessionId: "sess-abc", projectDir: "/home/ubuntu", title: "my chat" });
+  test("UF-11 clicking a conversation in the sidebar loads its transcript", async ({
+    page,
+  }) => {
+    const conversation = makeConversation({
+      sessionId: "sess-abc",
+      projectDir: "/home/ubuntu",
+      title: "my chat",
+    });
 
     await setupApp(page, {
       conversations: [conversation],
@@ -44,7 +50,11 @@ test.describe("session", () => {
   test("UF-12 tool results are shown when resuming a conversation from transcript", async ({
     page,
   }) => {
-    const conversation = makeConversation({ sessionId: "sess-tool", projectDir: "/home/ubuntu", title: "tool session" });
+    const conversation = makeConversation({
+      sessionId: "sess-tool",
+      projectDir: "/home/ubuntu",
+      title: "tool session",
+    });
 
     await setupApp(page, {
       conversations: [conversation],
@@ -124,10 +134,26 @@ test.describe("session", () => {
     await expect(page.getByText("No conversations yet")).toBeVisible();
 
     // Add a server session, then click Refresh
-    ctrl.setSessions([makeSession({ session_id: "sess-new", title: "Imported session" })]);
+    ctrl.setSessions([
+      makeSession({ session_id: "sess-new", title: "Imported session" }),
+    ]);
     await page.getByTitle("Refresh conversations").click();
 
     // The imported session now appears in the sidebar
-    await expect(page.locator("span.truncate").filter({ hasText: "Imported session" })).toBeVisible();
+    await expect(
+      page.locator("span.truncate").filter({ hasText: "Imported session" }),
+    ).toBeVisible();
+  });
+
+  test("ST-05 session with custom title displays it in sidebar", async ({
+    page,
+  }) => {
+    const conversation = makeConversation({ title: "fix-mobile-layout" });
+
+    await setupApp(page, { conversations: [conversation] });
+
+    await expect(
+      page.locator("span.truncate").filter({ hasText: "fix-mobile-layout" }),
+    ).toBeVisible();
   });
 });

@@ -59,6 +59,14 @@ pub(crate) async fn get_csrf_token_handler(
     Ok(Json(CsrfTokenResponse { csrf_token }).into_response())
 }
 
+fn is_user_provisioning(state: &AppState, user_id: Uuid) -> Result<bool, AppError> {
+    let provisioning = state
+        .provisioning_users
+        .lock()
+        .map_err(|_| anyhow!("provisioning lock poisoned"))?;
+    Ok(provisioning.contains(&user_id))
+}
+
 fn register_vm(vms: &VmRegistry, vm_id: String, vm_entry: VmEntry) -> Result<(), AppError> {
     let mut registry = vms
         .lock()
@@ -90,8 +98,8 @@ impl FromRequestParts<AppState> for UserVm {
         // Step 2: Look up the user in the database, redirect to login if not found
         let db_user = get_user_by_email(&state.db, &user.email)
             .await
-            .map_err(|e| {
-                error!("db error: {e}");
+            .map_err(|_| {
+                error!("db error");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "An internal error occurred",
@@ -100,8 +108,8 @@ impl FromRequestParts<AppState> for UserVm {
             })?
             .ok_or_else(|| Redirect::to("/login").into_response())?;
         // Step 3: Find an existing VM for the user, or provision a new one
-        let (vm_id, guest_ip) = match find_user_vm(&state.vms, db_user.id).map_err(|e| {
-            error!("vm registry error: {e}");
+        let (vm_id, guest_ip) = match find_user_vm(&state.vms, db_user.id).map_err(|_| {
+            error!("vm registry error");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "An internal error occurred",
@@ -110,9 +118,36 @@ impl FromRequestParts<AppState> for UserVm {
         })? {
             Some(entry) => entry,
             None => {
+                // If already being provisioned by vm_status_handler, return 503
+                // so the frontend can retry after the VM is ready.
+                if is_user_provisioning(state, db_user.id).map_err(|_| {
+                    error!("provisioning check error");
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "An internal error occurred",
+                    )
+                        .into_response()
+                })? {
+                    return Err((
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "VM is still starting, please try again",
+                    )
+                        .into_response());
+                }
                 let user_vm = provision_new_vm(state, db_user.id)
                     .await
                     .map_err(IntoResponse::into_response)?;
+                // Write settings to the freshly provisioned VM
+                write_initial_settings(parts, state, user_vm.guest_ip)
+                    .await
+                    .map_err(|_| {
+                        error!("failed to write initial settings");
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "An internal error occurred",
+                        )
+                            .into_response()
+                    })?;
                 return Ok(user_vm);
             }
         };
@@ -122,6 +157,93 @@ impl FromRequestParts<AppState> for UserVm {
             guest_ip,
         })
     }
+}
+
+/// Best-effort write of initial settings to a freshly provisioned VM.
+/// If a gateway API key is available in the session, writes API key settings.
+/// Otherwise, if using Bedrock/IAM mode, writes Bedrock default settings so the
+/// VM has the correct model IDs from the server config (not baked into the rootfs).
+async fn write_initial_settings(
+    parts: &mut Parts,
+    state: &AppState,
+    guest_ip: Ipv4Addr,
+) -> Result<()> {
+    let session = Session::from_request_parts(parts, state)
+        .await
+        .map_err(|_| anyhow!("failed to extract session"))?;
+    let gateway_key = session
+        .get::<String>("gateway_api_key")
+        .await
+        .context("failed to read gateway_api_key from session")?;
+
+    let content = match gateway_key {
+        Some(key) => chat_settings::build_api_key_settings_json(
+            &key,
+            state.config.anthropic_base_url.as_deref(),
+            &state.config.anthropic_default_haiku_model,
+            &state.config.anthropic_default_sonnet_model,
+            &state.config.anthropic_default_opus_model,
+            state.config.enable_mcp,
+        )?,
+        None => return write_bedrock_settings(state, guest_ip).await,
+    };
+
+    chat_settings::set_vm_settings(
+        guest_ip,
+        &state.config.ssh_key_path,
+        &state.config.ssh_user,
+        &state.config.vm_host_key_path,
+        &content,
+    )
+    .await
+}
+
+/// Best-effort write of gateway API key settings to a VM using a pre-extracted key.
+/// Used by the background provisioning path where session is not available.
+async fn write_gateway_settings_with_key(
+    state: &AppState,
+    guest_ip: Ipv4Addr,
+    gateway_key: &str,
+) -> Result<()> {
+    let content = chat_settings::build_api_key_settings_json(
+        gateway_key,
+        state.config.anthropic_base_url.as_deref(),
+        &state.config.anthropic_default_haiku_model,
+        &state.config.anthropic_default_sonnet_model,
+        &state.config.anthropic_default_opus_model,
+        state.config.enable_mcp,
+    )?;
+    chat_settings::set_vm_settings(
+        guest_ip,
+        &state.config.ssh_key_path,
+        &state.config.ssh_user,
+        &state.config.vm_host_key_path,
+        &content,
+    )
+    .await
+}
+
+/// Best-effort write of Bedrock default settings to a VM.
+/// Only writes when running in IAM/Bedrock mode so the VM gets the correct
+/// model IDs from the server config rather than relying on a baked-in rootfs.
+async fn write_bedrock_settings(state: &AppState, guest_ip: Ipv4Addr) -> Result<()> {
+    if !state.config.use_iam_creds {
+        return Ok(());
+    }
+    let content = chat_settings::build_bedrock_settings_json(
+        &state.config.anthropic_default_haiku_model,
+        &state.config.anthropic_default_sonnet_model,
+        &state.config.anthropic_default_opus_model,
+        state.config.enable_mcp,
+    )?;
+    chat_settings::set_vm_settings(
+        guest_ip,
+        &state.config.ssh_key_path,
+        &state.config.ssh_user,
+        &state.config.vm_host_key_path,
+        &content,
+    )
+    .await
 }
 
 fn remove_user_vm(vms: &VmRegistry, user_id: Uuid) -> Result<()> {
@@ -143,11 +265,79 @@ fn remove_user_vm(vms: &VmRegistry, user_id: Uuid) -> Result<()> {
 }
 
 pub(crate) async fn get_or_create_terminal(
-    user_vm: UserVm,
+    user: User,
     session: Session,
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
-    build_terminal_response(&session, &state, user_vm.user_id, &user_vm.vm_id).await
+    let Some(db_user) = get_user_by_email(&state.db, &user.email).await? else {
+        return Ok(Redirect::to("/login").into_response());
+    };
+    let has_user_rootfs = find_user_rootfs(&state.config.user_rootfs_dir, db_user.id).is_some();
+    let csrf_token = get_csrf_token(&session).await?;
+    // Serve the page immediately with vm_id="" — the frontend will poll /api/vm-status
+    Ok(Html(render_terminal_page(
+        "",
+        &csrf_token,
+        &state.config.upload_dir,
+        has_user_rootfs,
+    ))
+    .into_response())
+}
+
+pub(crate) async fn vm_status_handler(
+    user: User,
+    session: Session,
+    State(state): State<AppState>,
+) -> Result<Response, AppError> {
+    let Some(db_user) = get_user_by_email(&state.db, &user.email).await? else {
+        return Ok(Redirect::to("/login").into_response());
+    };
+    let user_id = db_user.id;
+
+    // Check if VM already exists
+    if let Some((vm_id, _guest_ip)) = find_user_vm(&state.vms, user_id)? {
+        let has_user_rootfs = find_user_rootfs(&state.config.user_rootfs_dir, user_id).is_some();
+        return Ok(Json(serde_json::json!({
+            "status": "ready",
+            "vm_id": vm_id,
+            "has_user_rootfs": has_user_rootfs,
+        }))
+        .into_response());
+    }
+
+    // Check if already provisioning
+    if is_user_provisioning(&state, user_id)? {
+        return Ok(Json(serde_json::json!({"status": "provisioning"})).into_response());
+    }
+
+    // Extract gateway key from session before spawning background task
+    let gateway_key = session
+        .get::<String>("gateway_api_key")
+        .await
+        .context("failed to read gateway_api_key from session")?;
+
+    // Spawn provisioning in background
+    let state_clone = state.clone();
+    tokio::spawn(async move {
+        match provision_new_vm(&state_clone, user_id).await {
+            Ok(user_vm) => {
+                // Write gateway settings if available, otherwise write bedrock defaults
+                let result = if let Some(key) = gateway_key {
+                    write_gateway_settings_with_key(&state_clone, user_vm.guest_ip, &key).await
+                } else {
+                    write_bedrock_settings(&state_clone, user_vm.guest_ip).await
+                };
+                if result.is_err() {
+                    error!("failed to write settings to VM");
+                }
+            }
+            Err(_) => {
+                error!("background vm provisioning failed");
+            }
+        }
+    });
+
+    Ok(Json(serde_json::json!({"status": "provisioning"})).into_response())
 }
 
 /// Atomically reserves a provisioning slot for a user by locking both `vms` and
@@ -321,19 +511,15 @@ pub(crate) async fn list_chat_sessions_handler(
     user_vm: UserVm,
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
-    Ok(list_chat_sessions(
+    let sessions = list_chat_sessions(
         user_vm.guest_ip,
         &state.config.ssh_key_path,
         &state.config.ssh_user,
         &state.config.vm_host_key_path,
         &state.config.ssh_user_home,
     )
-    .await
-    .map(|sessions| Json(sessions).into_response())
-    .unwrap_or_else(|e| {
-        error!("list_chat_sessions failed: {e}");
-        (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response()
-    }))
+    .await?;
+    Ok(Json(sessions).into_response())
 }
 
 #[derive(Deserialize)]
@@ -347,7 +533,9 @@ pub(crate) async fn get_chat_transcript_handler(
     Query(query): Query<TranscriptQuery>,
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
-    Ok(fetch_chat_history(
+    validate_session_id(&query.session_id)?;
+    validate_within_dir(Path::new(&query.project_dir), &state.config.ssh_user_home)?;
+    let history = fetch_chat_history(
         user_vm.guest_ip,
         &state.config.ssh_key_path,
         &state.config.ssh_user,
@@ -355,12 +543,8 @@ pub(crate) async fn get_chat_transcript_handler(
         &query.session_id,
         Path::new(&query.project_dir),
     )
-    .await
-    .map(|history| Json(history).into_response())
-    .unwrap_or_else(|e| {
-        error!("fetch_chat_history failed: {e}");
-        (StatusCode::NOT_FOUND, "Transcript not found").into_response()
-    }))
+    .await?;
+    Ok(Json(history).into_response())
 }
 
 #[derive(Deserialize)]
@@ -374,6 +558,8 @@ pub(crate) async fn delete_chat_session_handler(
     State(state): State<AppState>,
     Json(form): Json<DeleteChatSessionForm>,
 ) -> Result<Response, AppError> {
+    validate_session_id(&form.session_id)?;
+    validate_within_dir(Path::new(&form.project_dir), &state.config.ssh_user_home)?;
     delete_chat_session(
         user_vm.guest_ip,
         &state.config.ssh_key_path,
@@ -418,7 +604,7 @@ async fn stream_chat_attachment(multipart: &mut Multipart, sftp: &SftpSession) -
                 .file_name()
                 .context("file upload missing filename")?
                 .to_owned();
-            let remote_path = build_chat_upload_path(&filename);
+            let remote_path = build_chat_upload_path(&filename)?;
             let real_path = PathBuf::from(
                 timeout(
                     Duration::from_secs(SFTP_OP_TIMEOUT_SECS),
@@ -449,13 +635,27 @@ async fn stream_chat_attachment(multipart: &mut Multipart, sftp: &SftpSession) -
     Err(anyhow!("missing 'file' field"))
 }
 
-fn build_chat_upload_path(filename: &str) -> PathBuf {
+fn build_chat_upload_path(filename: &str) -> Result<PathBuf> {
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .expect("system clock is before Unix epoch")
+        .context("system clock is before Unix epoch")?
         .as_millis();
     let safe_name = sanitize_filename::sanitize(filename);
-    PathBuf::from("/tmp").join(format!("{ts}_{safe_name}"))
+    Ok(PathBuf::from("/tmp").join(format!("{ts}_{safe_name}")))
+}
+
+/// Validates that a session_id looks like a UUID (alphanumeric + hyphens only).
+/// Prevents path traversal via crafted session IDs like "../../etc/passwd".
+fn validate_session_id(session_id: &str) -> Result<(), AppError> {
+    if session_id.is_empty()
+        || session_id.len() > 64
+        || !session_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+    {
+        return Err(anyhow!("invalid session_id").into());
+    }
+    Ok(())
 }
 
 async fn write_chat_file_via_sftp(
@@ -472,7 +672,7 @@ async fn write_chat_file_via_sftp(
     )
     .await
     .context("sftp create timed out")?
-    .map_err(|e| anyhow!("sftp create: {e}"))?;
+    .map_err(|_| anyhow!("sftp create failed"))?;
     timeout(
         Duration::from_secs(SFTP_OP_TIMEOUT_SECS),
         tokio::io::copy(reader, &mut file),
@@ -483,6 +683,87 @@ async fn write_chat_file_via_sftp(
     timeout(Duration::from_secs(SFTP_OP_TIMEOUT_SECS), file.shutdown())
         .await
         .context("sftp shutdown timed out")?
-        .map_err(|e| anyhow!("sftp shutdown: {e}"))?;
+        .map_err(|_| anyhow!("sftp shutdown failed"))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- validate_session_id tests ---
+
+    #[test]
+    fn valid_session_id_uuid() {
+        assert!(validate_session_id("550e8400-e29b-41d4-a716-446655440000").is_ok());
+    }
+
+    #[test]
+    fn valid_session_id_hex_only() {
+        assert!(validate_session_id("550e8400e29b41d4a716446655440000").is_ok());
+    }
+
+    #[test]
+    fn invalid_session_id_empty() {
+        assert!(validate_session_id("").is_err());
+    }
+
+    #[test]
+    fn invalid_session_id_path_traversal() {
+        assert!(validate_session_id("../../etc/passwd").is_err());
+    }
+
+    #[test]
+    fn invalid_session_id_slash() {
+        assert!(validate_session_id("abc/def").is_err());
+    }
+
+    #[test]
+    fn invalid_session_id_too_long() {
+        let long = "a".repeat(65);
+        assert!(validate_session_id(&long).is_err());
+    }
+
+    #[test]
+    fn invalid_session_id_special_chars() {
+        assert!(validate_session_id("abc;def").is_err());
+        assert!(validate_session_id("abc\ndef").is_err());
+    }
+
+    // --- build_chat_upload_path tests ---
+
+    #[test]
+    fn chat_upload_path_normal_filename() {
+        let path = build_chat_upload_path("test.png").unwrap();
+        assert!(path.starts_with("/tmp"));
+        assert!(path.to_string_lossy().contains("test.png"));
+    }
+
+    #[test]
+    fn chat_upload_path_sanitizes_traversal() {
+        let path = build_chat_upload_path("../../../etc/passwd").unwrap();
+        // sanitize_filename removes path separators; the remaining filename
+        // is harmless because validate_within_dir checks the canonical path
+        // before any SFTP write.
+        let name = path.file_name().unwrap().to_string_lossy();
+        assert!(!name.contains('/'));
+        assert!(path.starts_with("/tmp"));
+    }
+
+    #[test]
+    fn chat_upload_path_sanitizes_slashes() {
+        let path = build_chat_upload_path("path/to/file.txt").unwrap();
+        let name = path.file_name().unwrap().to_string_lossy();
+        assert!(!name.contains('/'));
+    }
+
+    #[test]
+    fn chat_upload_path_includes_timestamp() {
+        let path = build_chat_upload_path("file.txt").unwrap();
+        let name = path.file_name().unwrap().to_string_lossy();
+        // Timestamp is a large number followed by underscore
+        assert!(name.contains('_'));
+        let parts: Vec<&str> = name.splitn(2, '_').collect();
+        assert!(parts[0].parse::<u128>().is_ok());
+    }
 }

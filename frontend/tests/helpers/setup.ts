@@ -20,10 +20,31 @@ export type SseEvent =
   | { event: "init" }
   | { event: "text_delta"; data: { text: string } }
   | { event: "thinking_delta"; data: { thinking: string } }
-  | { event: "tool_start"; data: { id: string; name: string; input: Record<string, unknown> } }
-  | { event: "tool_result"; data: { tool_use_id: string; content: string; is_error: boolean } }
-  | { event: "ask_user_question"; data: { request_id: string; task_id: string; conversation_id?: string; questions: Question[] } }
-  | { event: "done"; data: { session_id: string | null; task_id: string; conversation_id?: string } }
+  | {
+      event: "tool_start";
+      data: { id: string; name: string; input: Record<string, unknown> };
+    }
+  | {
+      event: "tool_result";
+      data: { tool_use_id: string; content: string; is_error: boolean };
+    }
+  | {
+      event: "ask_user_question";
+      data: {
+        request_id: string;
+        task_id: string;
+        conversation_id?: string;
+        questions: Question[];
+      };
+    }
+  | {
+      event: "done";
+      data: {
+        session_id: string | null;
+        task_id: string;
+        conversation_id?: string;
+      };
+    }
   | { event: "error_event"; data: { message: string } };
 
 export function buildSseBody(events: SseEvent[]): string {
@@ -35,13 +56,22 @@ export function buildSseBody(events: SseEvent[]): string {
     .join("");
 }
 
-function injectConversationId(events: SseEvent[], conversationId: string): SseEvent[] {
+function injectConversationId(
+  events: SseEvent[],
+  conversationId: string,
+): SseEvent[] {
   return events.map((e) => {
     if (e.event === "done") {
-      return { ...e, data: { ...e.data, conversation_id: conversationId } } as SseEvent;
+      return {
+        ...e,
+        data: { ...e.data, conversation_id: conversationId },
+      } as SseEvent;
     }
     if (e.event === "ask_user_question") {
-      return { ...e, data: { ...e.data, conversation_id: conversationId } } as SseEvent;
+      return {
+        ...e,
+        data: { ...e.data, conversation_id: conversationId },
+      } as SseEvent;
     }
     return e;
   });
@@ -56,7 +86,10 @@ export const sse = {
     { event: "session_start", data: { task_id: DEFAULT_CLIENT_SESSION_ID } },
     { event: "init" },
     { event: "text_delta", data: { text } },
-    { event: "done", data: { session_id: sessionId, task_id: DEFAULT_CLIENT_SESSION_ID } },
+    {
+      event: "done",
+      data: { session_id: sessionId, task_id: DEFAULT_CLIENT_SESSION_ID },
+    },
   ],
 
   // init → text_delta with no thinking_delta in between (tests empty indicator removal)
@@ -64,15 +97,25 @@ export const sse = {
     { event: "session_start", data: { task_id: DEFAULT_CLIENT_SESSION_ID } },
     { event: "init" },
     { event: "text_delta", data: { text } },
-    { event: "done", data: { session_id: sessionId, task_id: DEFAULT_CLIENT_SESSION_ID } },
+    {
+      event: "done",
+      data: { session_id: sessionId, task_id: DEFAULT_CLIENT_SESSION_ID },
+    },
   ],
 
-  withThinking: (thinking: string, text: string, sessionId: string): SseEvent[] => [
+  withThinking: (
+    thinking: string,
+    text: string,
+    sessionId: string,
+  ): SseEvent[] => [
     { event: "session_start", data: { task_id: DEFAULT_CLIENT_SESSION_ID } },
     { event: "init" },
     { event: "thinking_delta", data: { thinking } },
     { event: "text_delta", data: { text } },
-    { event: "done", data: { session_id: sessionId, task_id: DEFAULT_CLIENT_SESSION_ID } },
+    {
+      event: "done",
+      data: { session_id: sessionId, task_id: DEFAULT_CLIENT_SESSION_ID },
+    },
   ],
 
   withTool: (
@@ -86,15 +129,28 @@ export const sse = {
     { event: "session_start", data: { task_id: DEFAULT_CLIENT_SESSION_ID } },
     { event: "init" },
     { event: "tool_start", data: { id: toolId, name: toolName, input } },
-    { event: "tool_result", data: { tool_use_id: toolId, content: result, is_error: false } },
+    {
+      event: "tool_result",
+      data: { tool_use_id: toolId, content: result, is_error: false },
+    },
     { event: "text_delta", data: { text } },
-    { event: "done", data: { session_id: sessionId, task_id: DEFAULT_CLIENT_SESSION_ID } },
+    {
+      event: "done",
+      data: { session_id: sessionId, task_id: DEFAULT_CLIENT_SESSION_ID },
+    },
   ],
 
   question: (requestId: string, questions: Question[]): SseEvent[] => [
     { event: "session_start", data: { task_id: DEFAULT_CLIENT_SESSION_ID } },
     { event: "init" },
-    { event: "ask_user_question", data: { request_id: requestId, task_id: DEFAULT_CLIENT_SESSION_ID, questions } },
+    {
+      event: "ask_user_question",
+      data: {
+        request_id: requestId,
+        task_id: DEFAULT_CLIENT_SESSION_ID,
+        questions,
+      },
+    },
     // done is sent separately after the user answers
   ],
 };
@@ -130,7 +186,9 @@ export interface Conversation {
 
 let _convCounter = 0;
 
-export function makeConversation(overrides: Partial<Conversation> = {}): Conversation {
+export function makeConversation(
+  overrides: Partial<Conversation> = {},
+): Conversation {
   _convCounter++;
   return {
     conversationId: `conv-test-${_convCounter}`,
@@ -154,11 +212,14 @@ export interface SettingsData {
   uses_bedrock: boolean;
   has_api_key: boolean;
   base_url: string | null;
+  model: string | null;
+  gateway_configured: boolean;
 }
 
 // ── App HTML ──────────────────────────────────────────────────────────────
 
-function buildAppHtml(hasUserRootfs: boolean): string {
+function buildAppHtml(hasUserRootfs: boolean, vmId?: string): string {
+  const effectiveVmId = vmId ?? VM_ID;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -169,7 +230,7 @@ function buildAppHtml(hasUserRootfs: boolean): string {
 </head>
 <body class="flex h-screen overflow-hidden bg-background text-foreground">
   <div id="app-config" hidden
-    data-vm-id="${VM_ID}"
+    data-vm-id="${effectiveVmId}"
     data-csrf-token="${CSRF_TOKEN}"
     data-upload-dir="/tmp"
     data-upload-action="/chat-upload"
@@ -208,9 +269,13 @@ export interface AppController {
   /** Body of the most recent POST /chat-stop, or null. */
   lastStopBody(): { task_id: string } | null;
   /** Body of the most recent POST /chat-question-answer, or null. */
-  lastAnswerBody(): { task_id: string; request_id: string; answers: Record<string, string> } | null;
+  lastAnswerBody(): {
+    task_id: string;
+    request_id: string;
+    answers: Record<string, string>;
+  } | null;
   /** Body of the most recent PUT /api/settings, or null. */
-  lastSettingsSave(): { api_key: string } | null;
+  lastSettingsSave(): { api_key?: string; model?: string } | null;
   /** Whether an upload POST was received. */
   uploadReceived(): boolean;
   /** Raw form body of the most recent POST /rootfs/delete, or null. */
@@ -220,8 +285,15 @@ export interface AppController {
    * for the next POST /chat. Pass null to stop sending the header.
    */
   setChatResponseToken(token: string | null): void;
+  /**
+   * Set the token the mock will echo back in the x-csrf-token response header
+   * for the next PUT /api/settings. Pass null to stop sending the header.
+   */
+  setSettingsResponseToken(token: string | null): void;
   /** CSRF token sent in the most recent DELETE /chat-transcript, or null. */
   lastDeleteCsrfToken(): string | null;
+  /** Whether a renew-gateway-key request was received. */
+  renewGatewayKeyRequested(): boolean;
 }
 
 export interface SetupOpts {
@@ -236,10 +308,18 @@ export interface SetupOpts {
   settingsSaveError?: boolean;
   /** When true, data-has-user-rootfs is set to "true" so the reset button is rendered. */
   hasUserRootfs?: boolean;
-  /** When set, POST /chat returns 503 with this text instead of the normal 200 response. */
+  /** When set, POST /chat returns this text as an error instead of the normal 200 response. Defaults to status 500. */
   chatError?: string;
+  /** HTTP status code for chatError. Defaults to 500. */
+  chatErrorStatus?: number;
   /** When set, POST /chat-question-answer returns 500 with this text instead of the normal 200 response. */
   answerError?: string;
+  /** When true, POST /api/renew-gateway-key returns a 500 error. */
+  renewGatewayKeyError?: boolean;
+  /** When set, POST /api/renew-gateway-key returns a redirect URL. */
+  renewGatewayKeyRedirect?: string;
+  /** Override the vmId in app-config. Defaults to VM_ID ("test-vm"). Set to "" to test provisioning flow. */
+  vmId?: string;
 }
 
 export async function setupApp(
@@ -253,18 +333,26 @@ export async function setupApp(
     uses_bedrock: false,
     has_api_key: false,
     base_url: null,
+    model: "sonnet",
+    gateway_configured: false,
     ...opts.settings,
   };
 
   const chatBodies: ChatBody[] = [];
   let stopReceived = false;
   let lastStopBody: { task_id: string } | null = null;
-  let lastAnswer: { task_id: string; request_id: string; answers: Record<string, string> } | null = null;
-  let lastSettingsSaveBody: { api_key: string } | null = null;
+  let lastAnswer: {
+    task_id: string;
+    request_id: string;
+    answers: Record<string, string>;
+  } | null = null;
+  let lastSettingsSaveBody: { api_key?: string; model?: string } | null = null;
   let uploadWasReceived = false;
   let lastResetBody: string | null = null;
   let chatResponseToken: string | null = null;
+  let settingsResponseToken: string | null = null;
   let lastDeleteCsrfTokenValue: string | null = null;
+  let renewGatewayKeyReceived = false;
 
   // SSE event delivery — shared between POST /chat and GET /chat-stream/**
   let resolveSse: ((events: SseEvent[]) => void) | null = null;
@@ -283,22 +371,38 @@ export async function setupApp(
 
   // ── Pre-seed conversations into localStorage ──────────────────────────────
   if (opts.conversations && opts.conversations.length > 0) {
-    await page.addInitScript((args: { vmId: string; conversations: Conversation[] }) => {
-      localStorage.setItem(`conversations_${args.vmId}`, JSON.stringify(args.conversations));
-    }, { vmId: VM_ID, conversations: opts.conversations });
+    await page.addInitScript(
+      (args: { vmId: string; conversations: Conversation[] }) => {
+        localStorage.setItem(
+          `conversations_${args.vmId}`,
+          JSON.stringify(args.conversations),
+        );
+      },
+      { vmId: VM_ID, conversations: opts.conversations },
+    );
   }
 
   // ── App HTML page ────────────────────────────────────────────────────────
   await page.route("http://localhost/", (route) =>
-    route.fulfill({ status: 200, contentType: "text/html", body: buildAppHtml(opts.hasUserRootfs ?? false) }),
+    route.fulfill({
+      status: 200,
+      contentType: "text/html",
+      body: buildAppHtml(opts.hasUserRootfs ?? false, opts.vmId),
+    }),
   );
 
   // ── Static files ────────────────────────────────────────────────────────
   await page.route("**/static/app.js", (route) =>
-    route.fulfill({ path: path.join(DIST_DIR, "app.js"), contentType: "application/javascript" }),
+    route.fulfill({
+      path: path.join(DIST_DIR, "app.js"),
+      contentType: "application/javascript",
+    }),
   );
   await page.route("**/static/styles.css", (route) =>
-    route.fulfill({ path: path.join(DIST_DIR, "styles.css"), contentType: "text/css" }),
+    route.fulfill({
+      path: path.join(DIST_DIR, "styles.css"),
+      contentType: "text/css",
+    }),
   );
   await page.route("**/favicon.ico", (route) => route.fulfill({ status: 204 }));
 
@@ -315,7 +419,8 @@ export async function setupApp(
   await page.route("**/chat-transcript**", async (route) => {
     if (route.request().method() === "DELETE") {
       const body = route.request().postDataJSON() as { session_id: string };
-      lastDeleteCsrfTokenValue = await route.request().headerValue("x-csrf-token") ?? null;
+      lastDeleteCsrfTokenValue =
+        (await route.request().headerValue("x-csrf-token")) ?? null;
       sessions = sessions.filter((s) => s.session_id !== body.session_id);
       await route.fulfill({ status: 200, body: "" });
     } else {
@@ -354,14 +459,41 @@ export async function setupApp(
       if (opts.settingsSaveError) {
         await route.fulfill({ status: 500, body: "Internal Server Error" });
       } else {
-        lastSettingsSaveBody = route.request().postDataJSON() as { api_key: string };
-        await route.fulfill({ status: 200, body: "" });
+        lastSettingsSaveBody = route.request().postDataJSON() as {
+          api_key?: string;
+          model?: string;
+        };
+        const headers: Record<string, string> = {};
+        if (settingsResponseToken !== null) {
+          headers["x-csrf-token"] = settingsResponseToken;
+        }
+        await route.fulfill({ status: 200, headers, body: "" });
       }
     } else {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify(settingsData),
+      });
+    }
+  });
+
+  // ── Renew gateway key endpoint ──────────────────────────────────────────
+  await page.route("**/api/renew-gateway-key", async (route) => {
+    renewGatewayKeyReceived = true;
+    if (opts.renewGatewayKeyError) {
+      await route.fulfill({ status: 500, body: "Internal Server Error" });
+    } else if (opts.renewGatewayKeyRedirect) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ redirect: opts.renewGatewayKeyRedirect }),
+      });
+    } else {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ status: "ok" }),
       });
     }
   });
@@ -376,8 +508,11 @@ export async function setupApp(
 
   // ── Reset (rootfs delete) endpoint ────────────────────────────────────────
   await page.route("**/rootfs/delete", async (route) => {
-    lastResetBody = await route.request().headerValue("x-csrf-token") ?? null;
-    await route.fulfill({ status: 303, headers: { Location: "http://localhost/" } });
+    lastResetBody = (await route.request().headerValue("x-csrf-token")) ?? null;
+    await route.fulfill({
+      status: 303,
+      headers: { Location: "http://localhost/" },
+    });
   });
 
   // ── Question answer endpoint ──────────────────────────────────────────────
@@ -388,7 +523,11 @@ export async function setupApp(
     }
     const raw = route.request().postData();
     lastAnswer = raw
-      ? (JSON.parse(raw) as { task_id: string; request_id: string; answers: Record<string, string> })
+      ? (JSON.parse(raw) as {
+          task_id: string;
+          request_id: string;
+          answers: Record<string, string>;
+        })
       : null;
     await route.fulfill({ status: 200, body: "" });
   });
@@ -397,10 +536,14 @@ export async function setupApp(
   // Opened by the app on mount when a running task is found in localStorage.
   await page.route("**/chat-stream/**", async (route) => {
     const url = new URL(route.request().url());
-    const reconnectConversationId = url.searchParams.get("conversation_id") ?? "";
+    const reconnectConversationId =
+      url.searchParams.get("conversation_id") ?? "";
 
     const events = await waitForSseEvents();
-    const injectedEvents = injectConversationId(events, reconnectConversationId);
+    const injectedEvents = injectConversationId(
+      events,
+      reconnectConversationId,
+    );
     await route.fulfill({
       status: 200,
       headers: {
@@ -417,12 +560,16 @@ export async function setupApp(
     if (route.request().method() !== "POST") return route.continue();
 
     if (opts.chatError) {
-      await route.fulfill({ status: 503, body: opts.chatError });
+      await route.fulfill({
+        status: opts.chatErrorStatus ?? 500,
+        body: opts.chatError,
+      });
       return;
     }
 
     const body = route.request().postDataJSON() as Omit<ChatBody, "csrf_token">;
-    const csrf_token = await route.request().headerValue("x-csrf-token") ?? null;
+    const csrf_token =
+      (await route.request().headerValue("x-csrf-token")) ?? null;
     chatBodies.push({ ...body, csrf_token });
     const conversationId = body.conversation_id;
 
@@ -430,7 +577,10 @@ export async function setupApp(
     const injectedEvents = injectConversationId(events, conversationId);
 
     // Prepend task_created event so the frontend learns the task_id
-    const taskCreatedData = JSON.stringify({ task_id: DEFAULT_CLIENT_SESSION_ID, conversation_id: conversationId });
+    const taskCreatedData = JSON.stringify({
+      task_id: DEFAULT_CLIENT_SESSION_ID,
+      conversation_id: conversationId,
+    });
     const taskCreatedLine = `event: task_created\ndata: ${taskCreatedData}\n\n`;
 
     const headers: Record<string, string> = {
@@ -450,8 +600,12 @@ export async function setupApp(
 
   // ── Load the app ──────────────────────────────────────────────────────────
   await page.goto("http://localhost/", { waitUntil: "domcontentloaded" });
-  // Wait for React to render the composer
-  await page.waitForSelector('textarea[placeholder="Message Claude…"]');
+  // Wait for React to render — either the composer (VM ready) or loading spinner
+  if (opts.vmId === "") {
+    await page.waitForSelector("text=Starting environment");
+  } else {
+    await page.waitForSelector('textarea[placeholder="Message Claude…"]');
+  }
 
   return {
     sendSseEvents: (events) => {
@@ -477,8 +631,14 @@ export async function setupApp(
     lastSettingsSave: () => lastSettingsSaveBody,
     uploadReceived: () => uploadWasReceived,
     lastResetFormData: () => lastResetBody,
-    setChatResponseToken: (token) => { chatResponseToken = token; },
+    setChatResponseToken: (token) => {
+      chatResponseToken = token;
+    },
+    setSettingsResponseToken: (token) => {
+      settingsResponseToken = token;
+    },
     lastDeleteCsrfToken: () => lastDeleteCsrfTokenValue,
+    renewGatewayKeyRequested: () => renewGatewayKeyReceived,
   };
 }
 

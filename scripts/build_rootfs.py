@@ -16,6 +16,7 @@ Use --no-test to skip the Firecracker smoke test after building:
 import argparse
 import http.client
 import json
+import re
 import shutil
 import socket
 import subprocess
@@ -35,24 +36,14 @@ ROOTFS_DIR = Path(__file__).parent.parent / "rootfs"
 AGENT_PY = ROOTFS_DIR / "agent.py"
 AGENT_SERVICE = ROOTFS_DIR / "agent.service"
 
-CLAUDE_SETTINGS = """\
-{
-  "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "env": {
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "us.anthropic.claude-opus-4-6-v1",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "us.anthropic.claude-sonnet-4-6",
-    "CLAUDE_CODE_USE_BEDROCK": "1"
-  }
-}
-"""
-
 # Runs as root inside the chroot.
 CHROOT_ROOT_SCRIPT = """\
 set -e
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y curl logrotate
+apt-get install -y curl logrotate socat
+# TODO: Supply-chain risk — piping curl to bash executes unverified remote code.
+# Ideally, pin to a specific version and verify with a checksum/signature.
 curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
 """
 
@@ -70,6 +61,8 @@ LOGROTATE_CONF = """\
 # Runs as the ubuntu user inside the chroot.
 CHROOT_USER_SCRIPT = """\
 set -e
+# TODO: Supply-chain risk — piping curl to bash executes unverified remote code.
+# Ideally, pin to a specific version and verify with a checksum/signature.
 curl -fsSL https://claude.ai/install.sh | bash
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
 """
@@ -112,7 +105,11 @@ def fetch_latest_fc_version() -> str:
 def list_s3_keys(fc_version: str, arch: str, prefix: str) -> list[str]:
     url = f"{S3_BUCKET}/?prefix=firecracker-ci/{fc_version}/{arch}/{prefix}&list-type=2"
     with urllib.request.urlopen(url) as resp:
-        xml = ET.fromstring(resp.read())
+        raw_xml = resp.read()
+        # Guard against XML bombs: reject unreasonably large responses before parsing.
+        if len(raw_xml) > 10 * 1024 * 1024:  # 10 MB
+            sys.exit("error: S3 listing response exceeds 10 MB, refusing to parse")
+        xml = ET.fromstring(raw_xml)
     ns = {"s3": "http://s3.amazonaws.com/doc/2006-03-01/"}
     return [el.text for el in xml.findall(".//s3:Key", ns) if el.text]
 
@@ -275,21 +272,78 @@ def install_claude_code(rootfs: Path) -> None:
     chroot_as_ubuntu(rootfs, CHROOT_USER_SCRIPT)
 
 
-def install_agent(rootfs: Path) -> None:
+def install_agent(rootfs: Path, mcp_base_url: str | None = None) -> None:
     opt = rootfs / "opt"
     opt.mkdir(exist_ok=True)
-    shutil.copy(str(AGENT_PY), str(opt / "agent.py"))
+    agent_dest = opt / "agent.py"
+    shutil.copy(str(AGENT_PY), str(agent_dest))
+
+    # Patch MCP_SERVERS in agent.py when an MCP base URL is configured so the
+    # agent knows to connect to the socat proxy baked into the image.
+    if mcp_base_url:
+        MCP_SERVERS_VALUE = (
+            '{\n    "gemini-websearch": {\n'
+            '        "type": "http",\n'
+            '        "url": f"http://localhost:{MCP_PROXY_PORT}/mcp",\n'
+            "    },\n}"
+        )
+        agent_text = agent_dest.read_text()
+        agent_text = agent_text.replace(
+            "MCP_SERVERS: dict = {}",
+            f"MCP_SERVERS: dict = {MCP_SERVERS_VALUE}",
+        )
+        agent_dest.write_text(agent_text)
+
     run(["chown", "-R", "1000:1000", str(opt)])
 
     # Install and enable the agent systemd service so agent.py starts on boot.
     systemd_system = rootfs / "etc/systemd/system"
     systemd_system.mkdir(parents=True, exist_ok=True)
-    shutil.copy(str(AGENT_SERVICE), str(systemd_system / "agent.service"))
+    service_dest = systemd_system / "agent.service"
+    shutil.copy(str(AGENT_SERVICE), str(service_dest))
+
     multi_user_wants = systemd_system / "multi-user.target.wants"
     multi_user_wants.mkdir(exist_ok=True)
     service_link = multi_user_wants / "agent.service"
     if not service_link.exists():
         service_link.symlink_to("../agent.service")
+
+    # Install socat MCP proxy service when an MCP base URL is configured.
+    if mcp_base_url:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(mcp_base_url)
+        host = parsed.hostname
+        # Validate hostname to prevent injection into the systemd service file.
+        if not host or not re.match(r'^[a-zA-Z0-9._-]+$', host):
+            sys.exit(f"error: invalid hostname in --mcp-base-url: {host!r}")
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        if parsed.scheme == "https":
+            # verify=0 disables TLS certificate validation. This is required
+            # because the upstream MCP server uses an internal/self-signed cert.
+            # TODO: Switch to verify=1 with a cafile= once the upstream provides
+            # a valid certificate or we bundle the internal CA.
+            upstream = f"OPENSSL:{host}:{port},verify=0"
+        else:
+            upstream = f"TCP:{host}:{port}"
+        service_text = f"""\
+[Unit]
+Description=MCP reverse proxy (socat)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/socat TCP-LISTEN:8443,fork,reuseaddr,bind=127.0.0.1 {upstream}
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+"""
+        (systemd_system / "mcp-proxy.service").write_text(service_text)
+        proxy_link = multi_user_wants / "mcp-proxy.service"
+        if not proxy_link.exists():
+            proxy_link.symlink_to("../mcp-proxy.service")
 
     # Pre-warm the uv package cache as the ubuntu user so the first VM startup
     # is instant.  Running any script with the same dependency set populates
@@ -312,10 +366,9 @@ def install_agent(rootfs: Path) -> None:
         print("warning: uv prewarm failed (agent will install deps on first run)")
 
 
-def write_claude_settings(rootfs: Path) -> None:
+def ensure_claude_dir(rootfs: Path) -> None:
     claude_dir = rootfs / "home/ubuntu/.claude"
     claude_dir.mkdir(parents=True, exist_ok=True)
-    (claude_dir / "settings.json").write_text(CLAUDE_SETTINGS)
     run(["chown", "-R", "1000:1000", str(claude_dir)])
 
 
@@ -541,6 +594,11 @@ def main() -> None:
         action="store_true",
         help="Skip the Firecracker smoke test after building",
     )
+    parser.add_argument(
+        "--mcp-base-url",
+        default=None,
+        help="MCP server base URL for socat reverse proxy (e.g. https://34.49.122.135)",
+    )
     args = parser.parse_args()
 
     workdir = args.workdir or Path(tempfile.mkdtemp(prefix="fc-build-"))
@@ -572,11 +630,11 @@ def main() -> None:
     try:
         install_system_packages(rootfs)
         install_claude_code(rootfs)
-        install_agent(rootfs)
+        install_agent(rootfs, mcp_base_url=args.mcp_base_url)
     finally:
         unmount_binds(mounts)
 
-    write_claude_settings(rootfs)
+    ensure_claude_dir(rootfs)
     ext4 = build_ext4_image(workdir, rootfs, ubuntu_name)
     kernel_dest, ext4_dest, client_key_dest, host_key_pub_dest = install_artifacts(
         kernel, ext4, client_ssh_key, host_ssh_key_pub, ubuntu_name

@@ -11,7 +11,7 @@ use chat_agent::{AgentMessage, send_agent_message, stream_task_sse};
 use futures::StreamExt;
 use serde::Deserialize;
 use std::convert::Infallible;
-use tracing::{error, info};
+use tracing::info;
 use uuid::Uuid;
 
 use crate::{
@@ -25,7 +25,7 @@ async fn dispatch_agent_message(
     user_vm: &UserVm,
     state: &AppState,
     message: &AgentMessage,
-) -> Result<(), Response> {
+) -> Result<(), AppError> {
     send_agent_message(
         user_vm.guest_ip,
         &state.config.ssh_key_path,
@@ -33,11 +33,8 @@ async fn dispatch_agent_message(
         &state.config.vm_host_key_path,
         message,
     )
-    .await
-    .map_err(|e| {
-        error!("failed to send agent message: {e}");
-        (StatusCode::SERVICE_UNAVAILABLE, "Agent not available").into_response()
-    })
+    .await?;
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -53,17 +50,19 @@ pub(crate) async fn handle_chat_query(
     State(state): State<AppState>,
     Json(body): Json<QueryBody>,
 ) -> Result<Response, AppError> {
+    // Limit content size to prevent resource exhaustion (1MB)
+    if body.content.len() > 1_000_000 {
+        return Err(anyhow!("content exceeds maximum size").into());
+    }
     let task_id = Uuid::new_v4().to_string();
     let conversation_id = Uuid::parse_str(&body.conversation_id)
         .map_err(|_| anyhow!("invalid conversation_id: expected UUID"))?
         .to_string();
-    if let Err(e) = update_vm_last_activity(&state.vms, &user_vm.vm_id) {
-        error!("failed to update vm activity: {e}");
-    }
+    update_vm_last_activity(&state.vms, &user_vm.vm_id)?;
     let task_created_json = serde_json::to_string(
         &serde_json::json!({"type": "task_created", "task_id": &task_id, "conversation_id": &conversation_id}),
     )
-    .map_err(|e| anyhow!("failed to serialize task_created event: {e}"))?;
+    .map_err(|_| anyhow!("failed to serialize task_created event"))?;
     let task_created_event = Bytes::from(format!(
         "event: task_created\ndata: {task_created_json}\n\n",
     ));
@@ -91,7 +90,7 @@ pub(crate) async fn handle_chat_query(
         .header(header::CACHE_CONTROL, "no-cache")
         .header("x-accel-buffering", "no")
         .body(body)
-        .map_err(|e| anyhow!("failed to build SSE response: {e}"))?;
+        .map_err(|_| anyhow!("failed to build SSE response"))?;
     Ok(response)
 }
 
@@ -106,9 +105,7 @@ pub(crate) async fn handle_chat_reconnect(
     Query(query): Query<ReconnectQuery>,
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
-    if let Err(e) = update_vm_last_activity(&state.vms, &user_vm.vm_id) {
-        error!("failed to update vm activity: {e}");
-    }
+    update_vm_last_activity(&state.vms, &user_vm.vm_id)?;
     let task_id = Uuid::parse_str(&task_id)
         .map_err(|_| anyhow!("invalid task_id: expected UUID"))?
         .to_string();
@@ -132,7 +129,7 @@ pub(crate) async fn handle_chat_reconnect(
         .header(header::CACHE_CONTROL, "no-cache")
         .header("x-accel-buffering", "no")
         .body(body)
-        .map_err(|e| anyhow!("failed to build SSE response: {e}"))
+        .map_err(|_| anyhow!("failed to build SSE response"))
         .map_err(AppError::from)
 }
 
@@ -154,9 +151,7 @@ pub(crate) async fn handle_chat_question_answer(
         request_id,
         answers: body.answers,
     };
-    if let Err(response) = dispatch_agent_message(&user_vm, &state, &agent_message).await {
-        return Ok(response);
-    }
+    dispatch_agent_message(&user_vm, &state, &agent_message).await?;
     info!("question answer forwarded");
     Ok((StatusCode::OK, "").into_response())
 }
@@ -175,9 +170,7 @@ pub(crate) async fn handle_chat_stop(
         .map_err(|_| anyhow!("invalid task_id: expected UUID"))?
         .to_string();
     let agent_message = AgentMessage::Interrupt { task_id };
-    if let Err(response) = dispatch_agent_message(&user_vm, &state, &agent_message).await {
-        return Ok(response);
-    }
+    dispatch_agent_message(&user_vm, &state, &agent_message).await?;
     info!("interrupt forwarded");
     Ok((StatusCode::OK, "").into_response())
 }
