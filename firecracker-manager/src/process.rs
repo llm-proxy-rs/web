@@ -14,8 +14,9 @@ use tokio::{
 use crate::vm::JailerConfig;
 
 pub(crate) fn spawn_firecracker_jailed(vm_id: &str, jailer: &JailerConfig) -> Result<Child> {
-    Ok(Command::new(&jailer.jailer_path)
+    Ok(Command::new("sudo")
         .args([
+            jailer.jailer_path.to_string_lossy().as_ref(),
             "--id",
             vm_id,
             "--exec-file",
