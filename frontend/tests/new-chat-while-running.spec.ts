@@ -40,11 +40,16 @@ test.describe("new chat while a task is running", () => {
     // Switch to a new chat
     await page.getByRole("button", { name: "New Chat" }).click();
 
-    // Queue SSE events for the second POST /chat
+    // Complete the first POST so the serialised csrfFetch releases the token,
+    // then queue events for the second POST.
+    ctrl.sendSseEvents(sse.text("Background done", "sess-1"));
     ctrl.sendSseEvents(sse.text("Response to new chat", "sess-2"));
 
     // Type and send a message in the new chat
     await sendMessage(page, "Hello new chat");
+
+    // Wait for the response to confirm the second POST was processed
+    await expect(page.locator("text=Response to new chat")).toBeVisible();
 
     // Verify POST /chat was fired for the new conversation
     const bodies = ctrl.allChatBodies();
