@@ -9,12 +9,12 @@ use serde::Deserialize;
 use sftp_client::open_sftp_session;
 use ssh_client::connect_ssh;
 use std::{path::PathBuf, time::Duration};
+use tokio::time::timeout;
 
 use crate::{
     handlers::UserVm,
     state::{AppError, AppState},
 };
-use tokio::time::timeout;
 
 const SFTP_OP_TIMEOUT_SECS: u64 = 30;
 

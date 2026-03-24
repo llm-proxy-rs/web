@@ -25,8 +25,8 @@ async fn send_request(
     })?;
     let (mut sender, conn) = http1::handshake(TokioIo::new(stream)).await?;
     tokio::spawn(async move {
-        if let Err(err) = conn.await {
-            tracing::debug!("firecracker connection closed: {err}");
+        if let Err(_err) = conn.await {
+            tracing::debug!("firecracker connection closed");
         }
     });
 

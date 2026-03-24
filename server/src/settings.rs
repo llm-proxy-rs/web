@@ -31,6 +31,119 @@ fn is_valid_api_key(key: &str) -> bool {
     !key.is_empty() && key.len() <= 256 && key.chars().all(|c| c.is_ascii_graphic())
 }
 
+#[derive(Serialize)]
+pub(crate) struct SettingsResponse {
+    uses_bedrock: bool,
+    has_api_key: bool,
+    base_url: Option<String>,
+    model: Option<String>,
+    gateway_configured: bool,
+}
+
+pub(crate) async fn get_settings_handler(
+    user_vm: UserVm,
+    State(state): State<AppState>,
+) -> Result<Response, AppError> {
+    // In Bedrock/IAM mode, skip the SSH round-trip since we don't need VM settings
+    if state.config.use_iam_creds {
+        return Ok(Json(SettingsResponse {
+            uses_bedrock: true,
+            has_api_key: false,
+            base_url: state.config.anthropic_base_url.clone(),
+            model: None,
+            gateway_configured: is_gateway_configured(&state.config),
+        })
+        .into_response());
+    }
+    let vm_settings = get_vm_settings(
+        user_vm.guest_ip,
+        &state.config.ssh_key_path,
+        &state.config.ssh_user,
+        &state.config.vm_host_key_path,
+    )
+    .await?;
+    Ok(Json(SettingsResponse {
+        uses_bedrock: false,
+        has_api_key: vm_settings.has_api_key,
+        base_url: state.config.anthropic_base_url.clone(),
+        model: vm_settings.model,
+        gateway_configured: is_gateway_configured(&state.config),
+    })
+    .into_response())
+}
+
+#[derive(Deserialize)]
+pub(crate) struct SetSettingsBody {
+    api_key: Option<String>,
+    model: Option<String>,
+}
+
+pub(crate) async fn put_settings_handler(
+    user_vm: UserVm,
+    State(state): State<AppState>,
+    Json(body): Json<SetSettingsBody>,
+) -> Result<Response, AppError> {
+    // Validate model if provided
+    if let Some(model) = &body.model
+        && !is_valid_model(model)
+    {
+        return Ok((StatusCode::BAD_REQUEST, "Invalid model identifier").into_response());
+    }
+    if let Some(api_key) = &body.api_key {
+        if !is_valid_api_key(api_key) {
+            return Ok((StatusCode::BAD_REQUEST, "Invalid API key").into_response());
+        }
+        if state.config.use_iam_creds {
+            return Ok(Json("API key not applicable in Bedrock mode").into_response());
+        }
+        update_api_key_setting(&user_vm, &state, api_key).await?;
+    } else if let Some(model) = &body.model {
+        update_model_setting(&user_vm, &state, model).await?;
+    }
+    Ok(Json("").into_response())
+}
+
+async fn update_api_key_setting(user_vm: &UserVm, state: &AppState, api_key: &str) -> Result<()> {
+    let content = build_api_key_settings_json(
+        api_key,
+        state.config.anthropic_base_url.as_deref(),
+        &state.config.anthropic_default_haiku_model,
+        &state.config.anthropic_default_sonnet_model,
+        &state.config.anthropic_default_opus_model,
+    )?;
+    set_vm_settings(
+        user_vm.guest_ip,
+        &state.config.ssh_key_path,
+        &state.config.ssh_user,
+        &state.config.vm_host_key_path,
+        &content,
+    )
+    .await
+}
+
+async fn update_model_setting(user_vm: &UserVm, state: &AppState, model: &str) -> Result<()> {
+    // Model-only update: read current settings, patch the model field, write back
+    let raw = get_vm_settings_raw(
+        user_vm.guest_ip,
+        &state.config.ssh_key_path,
+        &state.config.ssh_user,
+        &state.config.vm_host_key_path,
+    )
+    .await?;
+    let mut settings: serde_json::Value =
+        serde_json::from_str(raw.trim()).context("failed to parse settings JSON")?;
+    settings["model"] = serde_json::Value::String(model.to_owned());
+    let content = settings.to_string();
+    set_vm_settings(
+        user_vm.guest_ip,
+        &state.config.ssh_key_path,
+        &state.config.ssh_user,
+        &state.config.vm_host_key_path,
+        &content,
+    )
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -143,117 +256,4 @@ mod tests {
     fn invalid_api_key_with_tab() {
         assert!(!is_valid_api_key("sk\tant"));
     }
-}
-
-#[derive(Serialize)]
-pub(crate) struct SettingsResponse {
-    uses_bedrock: bool,
-    has_api_key: bool,
-    base_url: Option<String>,
-    model: Option<String>,
-    gateway_configured: bool,
-}
-
-pub(crate) async fn get_settings_handler(
-    user_vm: UserVm,
-    State(state): State<AppState>,
-) -> Result<Response, AppError> {
-    // In Bedrock/IAM mode, skip the SSH round-trip since we don't need VM settings
-    if state.config.use_iam_creds {
-        return Ok(Json(SettingsResponse {
-            uses_bedrock: true,
-            has_api_key: false,
-            base_url: state.config.anthropic_base_url.clone(),
-            model: None,
-            gateway_configured: is_gateway_configured(&state.config),
-        })
-        .into_response());
-    }
-    let vm_settings = get_vm_settings(
-        user_vm.guest_ip,
-        &state.config.ssh_key_path,
-        &state.config.ssh_user,
-        &state.config.vm_host_key_path,
-    )
-    .await?;
-    Ok(Json(SettingsResponse {
-        uses_bedrock: false,
-        has_api_key: vm_settings.has_api_key,
-        base_url: state.config.anthropic_base_url.clone(),
-        model: vm_settings.model,
-        gateway_configured: is_gateway_configured(&state.config),
-    })
-    .into_response())
-}
-
-#[derive(Deserialize)]
-pub(crate) struct SetSettingsBody {
-    api_key: Option<String>,
-    model: Option<String>,
-}
-
-pub(crate) async fn put_settings_handler(
-    user_vm: UserVm,
-    State(state): State<AppState>,
-    Json(body): Json<SetSettingsBody>,
-) -> Result<Response, AppError> {
-    // Validate model if provided
-    if let Some(model) = &body.model
-        && !is_valid_model(model)
-    {
-        return Ok((StatusCode::BAD_REQUEST, "Invalid model identifier").into_response());
-    }
-    if let Some(api_key) = &body.api_key {
-        if !is_valid_api_key(api_key) {
-            return Ok((StatusCode::BAD_REQUEST, "Invalid API key").into_response());
-        }
-        if state.config.use_iam_creds {
-            return Ok(Json("API key not applicable in Bedrock mode").into_response());
-        }
-        update_api_key_setting(&user_vm, &state, api_key).await?;
-    } else if let Some(model) = &body.model {
-        update_model_setting(&user_vm, &state, model).await?;
-    }
-    Ok(Json("").into_response())
-}
-
-async fn update_api_key_setting(user_vm: &UserVm, state: &AppState, api_key: &str) -> Result<()> {
-    let content = build_api_key_settings_json(
-        api_key,
-        state.config.anthropic_base_url.as_deref(),
-        &state.config.anthropic_default_haiku_model,
-        &state.config.anthropic_default_sonnet_model,
-        &state.config.anthropic_default_opus_model,
-    )?;
-    set_vm_settings(
-        user_vm.guest_ip,
-        &state.config.ssh_key_path,
-        &state.config.ssh_user,
-        &state.config.vm_host_key_path,
-        &content,
-    )
-    .await
-}
-
-async fn update_model_setting(user_vm: &UserVm, state: &AppState, model: &str) -> Result<()> {
-    // Model-only update: read current settings, patch the model field, write back
-    let raw = get_vm_settings_raw(
-        user_vm.guest_ip,
-        &state.config.ssh_key_path,
-        &state.config.ssh_user,
-        &state.config.vm_host_key_path,
-    )
-    .await?;
-    let mut settings: serde_json::Value =
-        serde_json::from_str(raw.trim()).context("failed to parse settings JSON")?;
-    settings["model"] = serde_json::Value::String(model.to_owned());
-    let content = settings.to_string();
-    set_vm_settings(
-        user_vm.guest_ip,
-        &state.config.ssh_key_path,
-        &state.config.ssh_user,
-        &state.config.vm_host_key_path,
-        &content,
-    )
-    .await
 }
