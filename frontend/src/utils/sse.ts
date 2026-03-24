@@ -141,13 +141,18 @@ export async function readFetchSseStream(
       buffer += decoder.decode(value, { stream: true });
       const parts = buffer.split("\n\n");
       buffer = parts.pop() ?? "";
+      let streamEnded = false;
       for (const part of parts) {
         if (!part.trim()) continue;
         const block = parseSseBlock(part);
         if (block) {
           dispatchSseEvent(block.eventName, block.data, pushEvent, vmId);
+          if (block.eventName === "done" || block.eventName === "error_event") {
+            streamEnded = true;
+          }
         }
       }
+      if (streamEnded) break;
     }
   } finally {
     reader.releaseLock();

@@ -267,4 +267,73 @@ test.describe("message queue", () => {
     expect(bodies.length).toBe(2);
     expect(bodies[0].conversation_id).toBe(bodies[1].conversation_id);
   });
+
+  test("UF-91 new chat works after queue drains completely", async ({
+    page,
+  }) => {
+    const ctrl = await setupApp(page, {});
+
+    // Send first message and queue a second
+    await sendMessage(page, "Msg1");
+    await sendMessage(page, "Msg2");
+    await expect(page.getByText("Queued messages (1)")).toBeVisible();
+
+    // Complete first stream → queued message auto-dispatches
+    ctrl.sendSseEvents(sse.text("Reply1", "sess-1"));
+    await expect(page.getByText("Reply1")).toBeVisible();
+
+    // Complete second stream
+    ctrl.sendSseEvents(sse.text("Reply2", "sess-2"));
+    await expect(page.getByText("Reply2")).toBeVisible();
+
+    // Queue drawer should be gone
+    await expect(page.getByText("Queued messages")).not.toBeVisible();
+
+    // Start a new chat and send a message
+    await page.getByRole("button", { name: "New Chat" }).click();
+    await sendMessage(page, "Fresh message");
+
+    // The new chat should get a response
+    ctrl.sendSseEvents(sse.text("Fresh reply", "sess-3"));
+    await expect(page.getByText("Fresh reply")).toBeVisible();
+
+    // Verify three total POSTs: Msg1, Msg2, Fresh message
+    const bodies = ctrl.allChatBodies();
+    expect(bodies.length).toBe(3);
+    expect(bodies[2].content).toBe("Fresh message");
+    // New chat should have a different conversation_id
+    expect(bodies[2].conversation_id).not.toBe(bodies[0].conversation_id);
+  });
+
+  test("UF-92 new chat works while a queued message is still in-flight", async ({
+    page,
+  }) => {
+    const ctrl = await setupApp(page, {});
+
+    // Send first message and queue a second
+    await sendMessage(page, "Msg1");
+    await sendMessage(page, "Msg2");
+
+    // Complete first stream → Msg2 auto-dispatches
+    ctrl.sendSseEvents(sse.text("Reply1", "sess-1"));
+    await expect(page.getByText("Reply1")).toBeVisible();
+
+    // Msg2 is now in-flight (waiting for response). Switch to new chat.
+    await page.getByRole("button", { name: "New Chat" }).click();
+
+    // Complete the in-flight Msg2 stream
+    ctrl.sendSseEvents(sse.text("Reply2", "sess-2"));
+
+    // Send a brand new message in the new chat
+    await sendMessage(page, "New chat msg");
+    ctrl.sendSseEvents(sse.text("New chat reply", "sess-3"));
+    await expect(page.getByText("New chat reply")).toBeVisible();
+
+    // Verify all three POSTs fired with correct content
+    const bodies = ctrl.allChatBodies();
+    expect(bodies.length).toBe(3);
+    expect(bodies[0].content).toBe("Msg1");
+    expect(bodies[1].content).toBe("Msg2");
+    expect(bodies[2].content).toBe("New chat msg");
+  });
 });

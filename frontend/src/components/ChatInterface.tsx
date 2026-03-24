@@ -244,7 +244,7 @@ export default function ChatInterface({
       sseCtx.sendStop(taskId).catch(console.error);
     } else {
       // Task ID not yet received — abort the in-flight fetch and clear running state
-      sseCtx.abortQuery();
+      sseCtx.abortQuery(viewConversationId);
       removeRunningConversation(viewConversationId);
     }
   }, [sseCtx, getTaskId, removeRunningConversation, viewConversationId]);
