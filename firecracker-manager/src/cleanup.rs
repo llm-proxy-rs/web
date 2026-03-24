@@ -1,7 +1,6 @@
+use crate::network::delete_tap;
 use std::path::Path;
 use tokio::{fs, process::Command};
-
-use crate::network::delete_tap;
 
 pub async fn cleanup_stale_vms(net_helper_path: &Path, jailer_chroot_base: &Path) {
     kill_stale_firecracker_processes().await;

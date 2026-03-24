@@ -1,10 +1,9 @@
+use crate::{Content, Role};
 use serde::Deserialize;
-
-use crate::Content;
 
 #[derive(Deserialize)]
 pub(crate) struct JournalMessage {
-    pub(crate) role: String,
+    pub(crate) role: Role,
     pub(crate) content: Content,
 }
 

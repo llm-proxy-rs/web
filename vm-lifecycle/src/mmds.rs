@@ -1,12 +1,13 @@
+use crate::{
+    VmRegistry,
+    iam::{HostIamCredential, fetch_host_iam_credentials},
+};
 use anyhow::{Result, anyhow};
 use firecracker_manager::{build_mmds_with_iam, put_mmds};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
 };
-
-use crate::VmRegistry;
-use crate::iam::{HostIamCredential, fetch_host_iam_credentials};
 
 pub async fn refresh_all_vm_mmds(
     vms: &VmRegistry,

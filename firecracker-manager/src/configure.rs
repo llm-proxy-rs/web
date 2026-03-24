@@ -1,3 +1,4 @@
+use crate::vm::VmConfig;
 use anyhow::Result;
 use firecracker_client::{
     BootSource, Drive, MachineConfig, MmdsConfig, NetworkInterface, put_mmds, set_boot_source,
@@ -5,8 +6,6 @@ use firecracker_client::{
 };
 use macaddr::MacAddr6;
 use std::path::Path;
-
-use crate::vm::VmConfig;
 
 pub(crate) async fn configure_vm(
     socket_path: &Path,

@@ -1,7 +1,6 @@
+use crate::http::send_put;
 use anyhow::Result;
 use std::path::Path;
-
-use crate::http::send_put;
 
 pub async fn start_instance(socket_path: &Path) -> Result<()> {
     send_put(

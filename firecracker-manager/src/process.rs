@@ -1,3 +1,4 @@
+use crate::vm::JailerConfig;
 use anyhow::{Context, Result};
 use std::{
     net::Ipv4Addr,
@@ -10,8 +11,6 @@ use tokio::{
     process::{Child, Command},
     time::{sleep, timeout},
 };
-
-use crate::vm::JailerConfig;
 
 pub(crate) fn spawn_firecracker_jailed(vm_id: &str, jailer: &JailerConfig) -> Result<Child> {
     Ok(Command::new("sudo")

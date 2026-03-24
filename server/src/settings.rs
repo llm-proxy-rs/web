@@ -1,4 +1,9 @@
-use anyhow::Context;
+use crate::{
+    gateway_auth::is_gateway_configured,
+    handlers::UserVm,
+    state::{AppError, AppState},
+};
+use anyhow::{Context, Result};
 use axum::{
     Json,
     extract::State,
@@ -9,12 +14,6 @@ use chat_settings::{
     build_api_key_settings_json, get_vm_settings, get_vm_settings_raw, set_vm_settings,
 };
 use serde::{Deserialize, Serialize};
-
-use crate::{
-    gateway_auth::is_gateway_configured,
-    handlers::UserVm,
-    state::{AppError, AppState},
-};
 
 /// Only allow model identifiers that look like valid model strings.
 /// Rejects arbitrary user input to prevent abuse.
@@ -210,42 +209,50 @@ pub(crate) async fn put_settings_handler(
         if state.config.use_iam_creds {
             return Ok(Json("API key not applicable in Bedrock mode").into_response());
         }
-        let content = build_api_key_settings_json(
-            api_key,
-            state.config.anthropic_base_url.as_deref(),
-            &state.config.anthropic_default_haiku_model,
-            &state.config.anthropic_default_sonnet_model,
-            &state.config.anthropic_default_opus_model,
-        )?;
-        set_vm_settings(
-            user_vm.guest_ip,
-            &state.config.ssh_key_path,
-            &state.config.ssh_user,
-            &state.config.vm_host_key_path,
-            &content,
-        )
-        .await?;
+        update_api_key_setting(&user_vm, &state, api_key).await?;
     } else if let Some(model) = &body.model {
-        // Model-only update: read current settings, patch the model field, write back
-        let raw = get_vm_settings_raw(
-            user_vm.guest_ip,
-            &state.config.ssh_key_path,
-            &state.config.ssh_user,
-            &state.config.vm_host_key_path,
-        )
-        .await?;
-        let mut settings: serde_json::Value =
-            serde_json::from_str(raw.trim()).context("failed to parse settings JSON")?;
-        settings["model"] = serde_json::Value::String(model.clone());
-        let content = settings.to_string();
-        set_vm_settings(
-            user_vm.guest_ip,
-            &state.config.ssh_key_path,
-            &state.config.ssh_user,
-            &state.config.vm_host_key_path,
-            &content,
-        )
-        .await?;
+        update_model_setting(&user_vm, &state, model).await?;
     }
     Ok(Json("").into_response())
+}
+
+async fn update_api_key_setting(user_vm: &UserVm, state: &AppState, api_key: &str) -> Result<()> {
+    let content = build_api_key_settings_json(
+        api_key,
+        state.config.anthropic_base_url.as_deref(),
+        &state.config.anthropic_default_haiku_model,
+        &state.config.anthropic_default_sonnet_model,
+        &state.config.anthropic_default_opus_model,
+    )?;
+    set_vm_settings(
+        user_vm.guest_ip,
+        &state.config.ssh_key_path,
+        &state.config.ssh_user,
+        &state.config.vm_host_key_path,
+        &content,
+    )
+    .await
+}
+
+async fn update_model_setting(user_vm: &UserVm, state: &AppState, model: &str) -> Result<()> {
+    // Model-only update: read current settings, patch the model field, write back
+    let raw = get_vm_settings_raw(
+        user_vm.guest_ip,
+        &state.config.ssh_key_path,
+        &state.config.ssh_user,
+        &state.config.vm_host_key_path,
+    )
+    .await?;
+    let mut settings: serde_json::Value =
+        serde_json::from_str(raw.trim()).context("failed to parse settings JSON")?;
+    settings["model"] = serde_json::Value::String(model.to_owned());
+    let content = settings.to_string();
+    set_vm_settings(
+        user_vm.guest_ip,
+        &state.config.ssh_key_path,
+        &state.config.ssh_user,
+        &state.config.vm_host_key_path,
+        &content,
+    )
+    .await
 }

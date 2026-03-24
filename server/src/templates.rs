@@ -1,6 +1,5 @@
-use std::path::Path;
-
 use html_escape::encode_double_quoted_attribute;
+use std::path::Path;
 
 pub(crate) fn render_login_page() -> String {
     r#"<!DOCTYPE html>

@@ -1,11 +1,10 @@
+use crate::{Content, Role, journal::JournalEntry};
 use anyhow::{Context, Result};
 use serde::Serialize;
 use sftp_client::open_sftp_session;
 use ssh_client::connect_ssh;
 use std::{net::Ipv4Addr, path::Path};
 use tokio::io::AsyncReadExt;
-
-use crate::{Content, journal::JournalEntry};
 
 #[derive(Serialize)]
 pub struct ChatHistory {
@@ -14,7 +13,7 @@ pub struct ChatHistory {
 
 #[derive(Serialize)]
 pub struct ChatMessage {
-    pub role: String,
+    pub role: Role,
     pub content: Content,
     #[serde(rename = "isCompactSummary")]
     pub is_compact_summary: bool,
@@ -44,7 +43,13 @@ pub(crate) fn parse_chat_history(contents: &str) -> ChatHistory {
     let mut skip_next_assistant = false;
     for entry in contents
         .lines()
-        .filter_map(|line| serde_json::from_str::<JournalEntry>(line).ok())
+        .filter_map(|line| match serde_json::from_str::<JournalEntry>(line) {
+            Ok(entry) => Some(entry),
+            Err(err) => {
+                tracing::warn!("failed to parse journal entry: {err}");
+                None
+            }
+        })
         .filter(|e| matches!(e.type_.as_str(), "user" | "assistant"))
         // isMeta entries (e.g. <local-command-caveat>) are injected by Claude
         // Code as bookkeeping markers, not real conversation messages.
@@ -167,7 +172,7 @@ mod tests {
     fn test_user_string_content_is_rendered() {
         let chat_history = parse_chat_history(FIXTURE_FIRST_USER);
         assert_eq!(chat_history.messages.len(), 1);
-        assert_eq!(chat_history.messages[0].role, "user");
+        assert_eq!(chat_history.messages[0].role, Role::User);
         let Content::Text(ref text) = chat_history.messages[0].content else {
             panic!()
         };
@@ -254,8 +259,8 @@ mod tests {
         .join("\n");
         let chat_history = parse_chat_history(&jsonl);
         assert_eq!(chat_history.messages.len(), 2);
-        assert_eq!(chat_history.messages[0].role, "user");
-        assert_eq!(chat_history.messages[1].role, "assistant");
+        assert_eq!(chat_history.messages[0].role, Role::User);
+        assert_eq!(chat_history.messages[1].role, Role::Assistant);
     }
 
     #[test]
@@ -263,7 +268,7 @@ mod tests {
         let jsonl = [FIXTURE_FIRST_USER, &make_interrupted_request_line()].join("\n");
         let chat_history = parse_chat_history(&jsonl);
         assert_eq!(chat_history.messages.len(), 1);
-        assert_eq!(chat_history.messages[0].role, "user");
+        assert_eq!(chat_history.messages[0].role, Role::User);
     }
 
     #[test]
@@ -271,7 +276,7 @@ mod tests {
         let jsonl = [FIXTURE_FIRST_USER, &make_interrupted_tool_use_line()].join("\n");
         let chat_history = parse_chat_history(&jsonl);
         assert_eq!(chat_history.messages.len(), 1);
-        assert_eq!(chat_history.messages[0].role, "user");
+        assert_eq!(chat_history.messages[0].role, Role::User);
     }
 
     #[test]

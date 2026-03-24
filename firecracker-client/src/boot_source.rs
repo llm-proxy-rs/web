@@ -1,8 +1,7 @@
+use crate::http::send_put;
 use anyhow::Result;
 use serde::Serialize;
 use std::path::Path;
-
-use crate::http::send_put;
 
 #[derive(Serialize)]
 pub struct BootSource {

@@ -1,3 +1,4 @@
+use crate::{VmEntry, VmRegistry};
 use anyhow::{Context, Result, anyhow};
 use common::copy_sparse;
 use std::{
@@ -8,8 +9,6 @@ use std::{
 use tokio::{fs, sync::Mutex as AsyncMutex, time::timeout};
 use tracing::info;
 use uuid::Uuid;
-
-use crate::{VmEntry, VmRegistry};
 
 const LOCK_TIMEOUT_SECS: u64 = 30;
 

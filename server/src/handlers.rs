@@ -1,3 +1,9 @@
+use crate::{
+    auth::User,
+    csrf::get_csrf_token,
+    state::{AppError, AppState, find_user_vm},
+    templates::render_terminal_page,
+};
 use anyhow::{Context, Result, anyhow};
 use axum::{
     Json,
@@ -33,13 +39,6 @@ use uuid::Uuid;
 use vm_lifecycle::{
     VmEntry, VmRegistry, build_user_rootfs_path, build_vm_config, build_vm_config_without_iam,
     ensure_user_rootfs, fetch_host_iam_credentials, find_user_rootfs,
-};
-
-use crate::{
-    auth::User,
-    csrf::get_csrf_token,
-    state::{AppError, AppState, find_user_vm},
-    templates::render_terminal_page,
 };
 
 const LOCK_TIMEOUT_SECS: u64 = 30;
@@ -108,7 +107,7 @@ impl FromRequestParts<AppState> for UserVm {
             })?
             .ok_or_else(|| Redirect::to("/login").into_response())?;
         // Step 3: Find an existing VM for the user, or provision a new one
-        let (vm_id, guest_ip) = match find_user_vm(&state.vms, db_user.id).map_err(|_| {
+        let user_vm_info = match find_user_vm(&state.vms, db_user.id).map_err(|_| {
             error!("vm registry error");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -116,71 +115,79 @@ impl FromRequestParts<AppState> for UserVm {
             )
                 .into_response()
         })? {
-            Some(entry) => entry,
+            Some(info) => info,
             None => {
-                // If already being provisioned by vm_status_handler, return 503
-                // so the frontend can retry after the VM is ready.
-                if is_user_provisioning(state, db_user.id).map_err(|_| {
-                    error!("provisioning check error");
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "An internal error occurred",
-                    )
-                        .into_response()
-                })? {
-                    return Err((
-                        StatusCode::SERVICE_UNAVAILABLE,
-                        "VM is still starting, please try again",
-                    )
-                        .into_response());
-                }
-                let (guard, vm_id, guest_ip, vm) = create_new_vm(state, db_user.id)
-                    .await
-                    .map_err(IntoResponse::into_response)?;
-                // Write settings before registering so the VM is never
-                // visible as "ready" without its API key / config.
-                write_initial_settings(parts, state, guest_ip)
-                    .await
-                    .map_err(|_| {
-                        error!("failed to write initial settings");
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            "An internal error occurred",
-                        )
-                            .into_response()
-                    })?;
-                register_vm(
-                    &state.vms,
-                    vm_id.clone(),
-                    VmEntry {
-                        user_id: db_user.id,
-                        has_iam_creds: state.config.use_iam_creds,
-                        last_activity: Instant::now(),
-                        vm,
-                    },
-                )
-                .map_err(|_| {
-                    error!("failed to register VM");
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "An internal error occurred",
-                    )
-                        .into_response()
-                })?;
-                drop(guard);
-                return Ok(UserVm {
-                    user_id: db_user.id,
-                    vm_id,
-                    guest_ip,
-                });
+                return provision_user_vm(parts, state, db_user.id).await;
             }
         };
         Ok(UserVm {
             user_id: db_user.id,
-            vm_id,
-            guest_ip,
+            vm_id: user_vm_info.vm_id,
+            guest_ip: user_vm_info.guest_ip,
         })
     }
+}
+
+async fn provision_user_vm(
+    parts: &mut Parts,
+    state: &AppState,
+    user_id: Uuid,
+) -> Result<UserVm, Response> {
+    // If already being provisioned by vm_status_handler, return 503
+    // so the frontend can retry after the VM is ready.
+    if is_user_provisioning(state, user_id).map_err(|_| {
+        error!("provisioning check error");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "An internal error occurred",
+        )
+            .into_response()
+    })? {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "VM is still starting, please try again",
+        )
+            .into_response());
+    }
+    let new_vm = create_new_vm(state, user_id)
+        .await
+        .map_err(IntoResponse::into_response)?;
+    // Write settings before registering so the VM is never
+    // visible as "ready" without its API key / config.
+    write_initial_settings(parts, state, new_vm.guest_ip)
+        .await
+        .map_err(|_| {
+            error!("failed to write initial settings");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "An internal error occurred",
+            )
+                .into_response()
+        })?;
+    register_vm(
+        &state.vms,
+        new_vm.vm_id.clone(),
+        VmEntry {
+            user_id,
+            has_iam_creds: state.config.use_iam_creds,
+            last_activity: Instant::now(),
+            vm: new_vm.vm,
+        },
+    )
+    .map_err(|_| {
+        error!("failed to register VM");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "An internal error occurred",
+        )
+            .into_response()
+    })?;
+    drop(new_vm.provisioning_guard);
+    Ok(UserVm {
+        user_id,
+        vm_id: new_vm.vm_id,
+        guest_ip: new_vm.guest_ip,
+    })
 }
 
 /// Writes initial settings to a freshly provisioned VM.
@@ -317,11 +324,11 @@ pub(crate) async fn vm_status_handler(
     let user_id = db_user.id;
 
     // Check if VM already exists
-    if let Some((vm_id, _guest_ip)) = find_user_vm(&state.vms, user_id)? {
+    if let Some(user_vm_info) = find_user_vm(&state.vms, user_id)? {
         let has_user_rootfs = find_user_rootfs(&state.config.user_rootfs_dir, user_id).is_some();
         return Ok(Json(serde_json::json!({
             "status": "ready",
-            "vm_id": vm_id,
+            "vm_id": user_vm_info.vm_id,
             "has_user_rootfs": has_user_rootfs,
         }))
         .into_response());
@@ -342,15 +349,15 @@ pub(crate) async fn vm_status_handler(
     let state_clone = state.clone();
     tokio::spawn(async move {
         match create_new_vm(&state_clone, user_id).await {
-            Ok((guard, vm_id, guest_ip, vm)) => {
+            Ok(new_vm) => {
                 // Write settings before registering so the VM is not visible
                 // as "ready" until the API key / bedrock config is in place.
                 // Retry a few times in case the VM's SSH is not ready yet.
                 for _ in 0..5 {
                     let result = if let Some(ref key) = gateway_key {
-                        write_gateway_settings_with_key(&state_clone, guest_ip, key).await
+                        write_gateway_settings_with_key(&state_clone, new_vm.guest_ip, key).await
                     } else {
-                        write_bedrock_settings(&state_clone, guest_ip).await
+                        write_bedrock_settings(&state_clone, new_vm.guest_ip).await
                     };
                     if result.is_ok() {
                         break;
@@ -359,19 +366,19 @@ pub(crate) async fn vm_status_handler(
                 }
                 if register_vm(
                     &state_clone.vms,
-                    vm_id,
+                    new_vm.vm_id,
                     VmEntry {
                         user_id,
                         has_iam_creds: state_clone.config.use_iam_creds,
                         last_activity: Instant::now(),
-                        vm,
+                        vm: new_vm.vm,
                     },
                 )
                 .is_err()
                 {
                     error!("failed to register VM");
                 }
-                drop(guard);
+                drop(new_vm.provisioning_guard);
             }
             Err(_) => {
                 error!("background vm provisioning failed");
@@ -455,10 +462,14 @@ impl Drop for ProvisioningGuard {
 /// (which keeps the user in the provisioning set), the VM ID, guest IP, and
 /// the VM handle. The caller is responsible for calling `register_vm` when
 /// the VM is ready to be visible as "ready".
-async fn create_new_vm(
-    state: &AppState,
-    user_id: Uuid,
-) -> Result<(ProvisioningGuard, String, Ipv4Addr, firecracker_manager::Vm), AppError> {
+struct NewVm {
+    provisioning_guard: ProvisioningGuard,
+    vm_id: String,
+    guest_ip: Ipv4Addr,
+    vm: firecracker_manager::Vm,
+}
+
+async fn create_new_vm(state: &AppState, user_id: Uuid) -> Result<NewVm, AppError> {
     // acquire_provisioning_slot locks vms + provisioning_users, performs all
     // checks, inserts user_id into the provisioning set, then drops both locks
     // before returning. The guard keeps user_id in the set for the duration of
@@ -484,7 +495,12 @@ async fn create_new_vm(
     info!("vm started");
     let vm_id = vm.id.clone();
     let guest_ip = vm.guest_ip();
-    Ok((guard, vm_id, guest_ip, vm))
+    Ok(NewVm {
+        provisioning_guard: guard,
+        vm_id,
+        guest_ip,
+        vm,
+    })
 }
 
 async fn build_terminal_response(
@@ -649,42 +665,51 @@ async fn stream_chat_attachment(
             continue;
         }
         if name == "file" {
-            let filename = field
-                .file_name()
-                .context("file upload missing filename")?
-                .to_owned();
-            let dest_dir = match &target_dir {
-                Some(d) => PathBuf::from(d),
-                None => upload_dir.to_path_buf(),
-            };
-            let remote_path = build_chat_upload_path(&filename, &dest_dir)?;
-            let real_path = PathBuf::from(
-                timeout(
-                    Duration::from_secs(SFTP_OP_TIMEOUT_SECS),
-                    sftp.canonicalize(
-                        remote_path
-                            .parent()
-                            .context("chat upload path has no parent")?
-                            .to_string_lossy()
-                            .into_owned(),
-                    ),
-                )
-                .await
-                .context("canonicalize timed out")?
-                .context("failed to resolve chat upload dir")?,
-            )
-            .join(
-                remote_path
-                    .file_name()
-                    .context("chat upload path has no filename")?,
-            );
-            validate_within_dir(&real_path, upload_dir)?;
-            let mut reader = StreamReader::new(field.map_err(IoError::other));
-            write_chat_file_via_sftp(sftp, &real_path, &mut reader).await?;
-            return Ok(real_path);
+            return process_attachment_field(field, &target_dir, sftp, upload_dir).await;
         }
     }
     Err(anyhow!("missing 'file' field"))
+}
+
+async fn process_attachment_field(
+    field: axum::extract::multipart::Field<'_>,
+    target_dir: &Option<String>,
+    sftp: &SftpSession,
+    upload_dir: &Path,
+) -> Result<PathBuf> {
+    let filename = field
+        .file_name()
+        .context("file upload missing filename")?
+        .to_owned();
+    let dest_dir = match target_dir {
+        Some(d) => PathBuf::from(d),
+        None => upload_dir.to_path_buf(),
+    };
+    let remote_path = build_chat_upload_path(&filename, &dest_dir)?;
+    let real_path = PathBuf::from(
+        timeout(
+            Duration::from_secs(SFTP_OP_TIMEOUT_SECS),
+            sftp.canonicalize(
+                remote_path
+                    .parent()
+                    .context("chat upload path has no parent")?
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
+        )
+        .await
+        .context("canonicalize timed out")?
+        .context("failed to resolve chat upload dir")?,
+    )
+    .join(
+        remote_path
+            .file_name()
+            .context("chat upload path has no filename")?,
+    );
+    validate_within_dir(&real_path, upload_dir)?;
+    let mut reader = StreamReader::new(field.map_err(IoError::other));
+    write_chat_file_via_sftp(sftp, &real_path, &mut reader).await?;
+    Ok(real_path)
 }
 
 fn build_chat_upload_path(filename: &str, upload_dir: &Path) -> Result<PathBuf> {

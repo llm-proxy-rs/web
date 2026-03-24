@@ -1,3 +1,9 @@
+use crate::{
+    Content,
+    history::{is_interrupted_request, is_local_command_output, is_slash_command},
+    journal::JournalEntry,
+    project::find_all_project_dirs,
+};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use futures::future::BoxFuture;
@@ -7,13 +13,6 @@ use sftp_client::open_sftp_session;
 use ssh_client::connect_ssh;
 use std::{net::Ipv4Addr, path::Path};
 use tokio::io::AsyncReadExt;
-
-use crate::{
-    Content,
-    history::{is_interrupted_request, is_local_command_output, is_slash_command},
-    journal::JournalEntry,
-    project::find_all_project_dirs,
-};
 
 #[derive(Serialize)]
 pub struct ChatSession {
@@ -136,7 +135,15 @@ fn extract_custom_title(contents: &str) -> Option<String> {
         .lines()
         .rev()
         // JSONL file contains mixed event types; skip lines that don't match.
-        .filter_map(|line| serde_json::from_str::<CustomTitleEntry>(line).ok())
+        .filter_map(
+            |line| match serde_json::from_str::<CustomTitleEntry>(line) {
+                Ok(entry) => Some(entry),
+                Err(err) => {
+                    tracing::warn!("failed to parse custom title entry: {err}");
+                    None
+                }
+            },
+        )
         .filter(|e| e.type_ == "custom-title")
         .find_map(|e| e.custom_title.filter(|t| !t.is_empty()))
 }
@@ -149,7 +156,13 @@ pub(crate) fn extract_last_user_title(contents: &str) -> Option<String> {
     contents
         .lines()
         .rev()
-        .filter_map(|line| serde_json::from_str::<JournalEntry>(line).ok())
+        .filter_map(|line| match serde_json::from_str::<JournalEntry>(line) {
+            Ok(entry) => Some(entry),
+            Err(err) => {
+                tracing::warn!("failed to parse journal entry: {err}");
+                None
+            }
+        })
         .filter(|e| e.type_ == "user")
         // isMeta entries (e.g. <local-command-caveat>) are injected by Claude
         // Code as bookkeeping markers, not real conversation messages.

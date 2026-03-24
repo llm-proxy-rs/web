@@ -1,3 +1,7 @@
+use crate::{
+    handlers::UserVm,
+    state::{AppError, AppState, update_vm_last_activity},
+};
 use anyhow::{Context, Result, bail};
 use axum::{
     Error as AxumError,
@@ -18,11 +22,6 @@ use tracing::{error, info, warn};
 use url::Url;
 use uuid::Uuid;
 use vm_lifecycle::{VmEntry, build_user_rootfs_path};
-
-use crate::{
-    handlers::UserVm,
-    state::{AppError, AppState, update_vm_last_activity},
-};
 
 const LOCK_TIMEOUT_SECS: u64 = 30;
 const SEND_TIMEOUT_SECS: u64 = 30;
@@ -141,8 +140,13 @@ async fn run_ssh_relay(
     tokio::spawn(async move {
         let mut ws_receiver = ws_receiver;
         while let Some(msg) = ws_receiver.next().await {
-            if ws_tx.send(msg).await.is_err() {
-                break;
+            match timeout(Duration::from_secs(SEND_TIMEOUT_SECS), ws_tx.send(msg)).await {
+                Ok(Ok(())) => {}
+                Ok(Err(_)) => break,
+                Err(_) => {
+                    warn!("ws mpsc send timed out, consumer likely stuck");
+                    break;
+                }
             }
         }
     });

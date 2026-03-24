@@ -1,3 +1,13 @@
+use crate::{
+    configure::configure_vm,
+    network::{
+        create_tap, delete_tap, format_guest_ip, format_guest_mac, format_tap_ip, format_tap_name,
+    },
+    process::{
+        build_chroot_dir, build_vm_boot_args, prepare_jail_resources, spawn_firecracker_jailed,
+        wait_for_socket,
+    },
+};
 use anyhow::{Context, Result};
 use common::copy_sparse;
 use firecracker_client::{start_instance, stop_instance};
@@ -14,15 +24,6 @@ use std::{
 };
 use tokio::fs::rename;
 use tracing::{info, warn};
-
-use crate::configure::configure_vm;
-use crate::network::{
-    create_tap, delete_tap, format_guest_ip, format_guest_mac, format_tap_ip, format_tap_name,
-};
-use crate::process::{
-    build_chroot_dir, build_vm_boot_args, prepare_jail_resources, spawn_firecracker_jailed,
-    wait_for_socket,
-};
 
 static VM_NET_INDICES: Mutex<BTreeSet<u8>> = Mutex::new(BTreeSet::new());
 
@@ -151,6 +152,22 @@ pub async fn create_vm(vm_config: &VmConfig) -> Result<Vm> {
     result
 }
 
+async fn prepare_vm_rootfs(
+    source_rootfs: &Path,
+    rootfs_copy: &Path,
+    jailer: &JailerConfig,
+) -> Result<()> {
+    info!("copying rootfs");
+    copy_sparse(source_rootfs, rootfs_copy).await?;
+    nix::unistd::chown(
+        rootfs_copy,
+        Some(Uid::from_raw(jailer.uid)),
+        Some(Gid::from_raw(jailer.gid)),
+    )
+    .context("failed to chown rootfs copy for jailer")?;
+    Ok(())
+}
+
 async fn launch_vm(
     vm_config: &VmConfig,
     net_idx: u8,
@@ -171,14 +188,7 @@ async fn launch_vm(
     let socket_path = chroot_dir.join("run/firecracker.socket");
 
     prepare_jail_resources(chroot_dir, &vm_config.kernel_path).await?;
-    info!("copying rootfs");
-    copy_sparse(&vm_config.rootfs_path, &rootfs_copy).await?;
-    nix::unistd::chown(
-        &rootfs_copy,
-        Some(Uid::from_raw(vm_config.jailer.uid)),
-        Some(Gid::from_raw(vm_config.jailer.gid)),
-    )
-    .context("failed to chown rootfs copy for jailer")?;
+    prepare_vm_rootfs(&vm_config.rootfs_path, &rootfs_copy, &vm_config.jailer).await?;
     let child = spawn_firecracker_jailed(&vm_config.id, &vm_config.jailer)?;
     let pid = child
         .id()

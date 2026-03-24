@@ -1,3 +1,8 @@
+use crate::{
+    auth::User,
+    gateway_auth::{exchange_gateway_code, provision_gateway_api_key},
+    state::{AppError, AppState},
+};
 use anyhow::Context;
 use axum::{
     extract::{Query, State},
@@ -6,12 +11,6 @@ use axum::{
 use serde::Deserialize;
 use tower_sessions::Session;
 use tracing::{error, info};
-
-use crate::{
-    auth::User,
-    gateway_auth::{exchange_gateway_code, provision_gateway_api_key},
-    state::{AppError, AppState},
-};
 
 #[derive(Deserialize)]
 pub(crate) struct GatewayCallbackQuery {
@@ -35,8 +34,7 @@ pub(crate) async fn gateway_callback_handler(
     let stored_state = session
         .remove::<String>("gateway_oauth_state")
         .await
-        .ok()
-        .flatten();
+        .context("failed to retrieve oauth state from session")?;
 
     if stored_state.as_deref() != Some(&query.state) {
         error!("gateway oauth state mismatch");
@@ -47,7 +45,7 @@ pub(crate) async fn gateway_callback_handler(
     let pkce_verifier = session
         .remove::<String>("gateway_oauth_pkce_verifier")
         .await
-        .map_err(|e| anyhow::anyhow!("failed to retrieve PKCE verifier from session: {e}"))?
+        .map_err(|_| anyhow::anyhow!("failed to retrieve PKCE verifier from session"))?
         .context("PKCE verifier missing from session")?;
 
     // Remove stored nonce (validated implicitly via the token exchange)

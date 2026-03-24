@@ -864,6 +864,7 @@ dependencies = [
  "sftp-client",
  "ssh-client",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -1581,6 +1582,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

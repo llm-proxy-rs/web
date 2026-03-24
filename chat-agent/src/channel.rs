@@ -1,3 +1,4 @@
+use crate::AgentMessage;
 use anyhow::{Context, Result};
 use bytes::Bytes;
 use russh::{Channel, client};
@@ -7,20 +8,26 @@ use std::path::Path;
 use tokio::time::{Duration, sleep, timeout};
 use tracing::info;
 
-use crate::AgentMessage;
-
 const AGENT_SOCKET_WAIT_SECS: u64 = 60;
+
+pub struct SshConnection {
+    pub ssh_handle: client::Handle<SshClient>,
+    pub ssh_channel: Channel<client::Msg>,
+}
 
 pub async fn connect_ssh_and_open_channel(
     guest_ip: Ipv4Addr,
     ssh_key_path: &Path,
     ssh_user: &str,
     vm_host_key_path: &Path,
-) -> Result<(client::Handle<SshClient>, Channel<client::Msg>)> {
+) -> Result<SshConnection> {
     let ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
     info!("agent ssh connected");
     let ssh_channel = open_agent_channel(&ssh_handle).await?;
-    Ok((ssh_handle, ssh_channel))
+    Ok(SshConnection {
+        ssh_handle,
+        ssh_channel,
+    })
 }
 
 pub async fn send_agent_message(
@@ -30,13 +37,13 @@ pub async fn send_agent_message(
     vm_host_key_path: &Path,
     message: &AgentMessage,
 ) -> Result<()> {
-    let (_ssh_handle, ssh_channel) =
+    let conn =
         connect_ssh_and_open_channel(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
     let line = format!(
         "{}\n",
         serde_json::to_string(message).context("failed to serialize agent message")?
     );
-    ssh_channel
+    conn.ssh_channel
         .data(Bytes::from(line).as_ref())
         .await
         .context("failed to write to agent socket")?;

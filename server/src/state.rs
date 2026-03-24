@@ -1,3 +1,4 @@
+use crate::static_files::StaticAssets;
 use anyhow::{Result, anyhow};
 use axum::{
     http::StatusCode,
@@ -17,8 +18,6 @@ use tokio::sync::Mutex as AsyncMutex;
 use tracing::error;
 use uuid::Uuid;
 use vm_lifecycle::{VmBuildConfig, VmRegistry};
-
-use crate::static_files::StaticAssets;
 
 #[derive(Clone, Deserialize)]
 pub(crate) struct AppConfig {
@@ -258,12 +257,20 @@ pub(crate) fn update_vm_last_activity(vms: &VmRegistry, vm_id: &str) -> Result<(
     Ok(())
 }
 
-pub(crate) fn find_user_vm(vms: &VmRegistry, user_id: Uuid) -> Result<Option<(String, Ipv4Addr)>> {
+pub(crate) struct UserVmInfo {
+    pub(crate) vm_id: String,
+    pub(crate) guest_ip: Ipv4Addr,
+}
+
+pub(crate) fn find_user_vm(vms: &VmRegistry, user_id: Uuid) -> Result<Option<UserVmInfo>> {
     let registry = vms
         .lock()
         .map_err(|_| anyhow!("vm registry lock poisoned"))?;
     Ok(registry
         .iter()
         .find(|(_, e)| e.user_id == user_id)
-        .map(|(id, e)| (id.clone(), e.vm.guest_ip())))
+        .map(|(id, e)| UserVmInfo {
+            vm_id: id.clone(),
+            guest_ip: e.vm.guest_ip(),
+        }))
 }

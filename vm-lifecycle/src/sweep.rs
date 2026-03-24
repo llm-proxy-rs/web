@@ -1,8 +1,7 @@
+use crate::{VmRegistry, build_user_rootfs_path};
 use std::{path::Path, time::Duration};
 use tokio::{fs, sync::Mutex as AsyncMutex, time::timeout};
 use tracing::{info, warn};
-
-use crate::{VmRegistry, build_user_rootfs_path};
 
 const IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 const LOCK_TIMEOUT_SECS: u64 = 30;
