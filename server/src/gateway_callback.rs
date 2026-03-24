@@ -3,14 +3,13 @@ use axum::{
     extract::{Query, State},
     response::{IntoResponse, Redirect, Response},
 };
-use chat_settings::{build_api_key_settings_json, set_vm_settings};
 use serde::Deserialize;
 use tower_sessions::Session;
 use tracing::{error, info};
 
 use crate::{
+    auth::User,
     gateway_auth::{exchange_gateway_code, provision_gateway_api_key},
-    handlers::UserVm,
     state::{AppError, AppState},
 };
 
@@ -24,10 +23,11 @@ pub(crate) struct GatewayCallbackQuery {
 ///
 /// Handles the redirect back from gateway Cognito after OAuth authorization.
 /// Validates the state nonce, exchanges the code for an access token,
-/// provisions an API key via the gateway, and writes it to the VM.
+/// provisions an API key via the gateway, and stores it in the session.
+/// The key is written to the VM later when it is provisioned via /api/vm-status.
 pub(crate) async fn gateway_callback_handler(
     query: Query<GatewayCallbackQuery>,
-    user_vm: UserVm,
+    _user: User,
     session: Session,
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
@@ -80,23 +80,8 @@ pub(crate) async fn gateway_callback_handler(
         .await
         .map_err(|_| anyhow::anyhow!("failed to store gateway_key_provisioned in session"))?;
 
-    // Write key to VM
-    let content = build_api_key_settings_json(
-        &api_key,
-        state.config.anthropic_base_url.as_deref(),
-        &state.config.anthropic_default_haiku_model,
-        &state.config.anthropic_default_sonnet_model,
-        &state.config.anthropic_default_opus_model,
-    )?;
-
-    set_vm_settings(
-        user_vm.guest_ip,
-        &state.config.ssh_key_path,
-        &state.config.ssh_user,
-        &state.config.vm_host_key_path,
-        &content,
-    )
-    .await?;
-
+    // The API key is now stored in the session. The VM will pick it up when
+    // provisioned via /api/vm-status (see write_initial_settings /
+    // write_gateway_settings_with_key).
     Ok(Redirect::to("/").into_response())
 }

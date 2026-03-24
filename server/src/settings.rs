@@ -26,6 +26,11 @@ fn is_valid_model(model: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ':' | '/'))
 }
 
+/// API keys must be 1..=256 printable ASCII characters (no spaces, control chars, or newlines).
+fn is_valid_api_key(key: &str) -> bool {
+    !key.is_empty() && key.len() <= 256 && key.chars().all(|c| c.is_ascii_graphic())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -93,6 +98,51 @@ mod tests {
         assert!(!is_valid_model("model&other"));
         assert!(!is_valid_model("model|pipe"));
     }
+
+    // ── API key validation ─────────────────────────────────────────────
+
+    #[test]
+    fn valid_api_key_simple() {
+        assert!(is_valid_api_key("sk-ant-api03-abc123"));
+    }
+
+    #[test]
+    fn invalid_api_key_empty() {
+        assert!(!is_valid_api_key(""));
+    }
+
+    #[test]
+    fn valid_api_key_at_max_length() {
+        let key = "a".repeat(256);
+        assert!(is_valid_api_key(&key));
+    }
+
+    #[test]
+    fn invalid_api_key_too_long() {
+        let key = "a".repeat(257);
+        assert!(!is_valid_api_key(&key));
+    }
+
+    #[test]
+    fn invalid_api_key_with_newline() {
+        assert!(!is_valid_api_key("sk-ant\ninjection"));
+    }
+
+    #[test]
+    fn invalid_api_key_with_control_char() {
+        assert!(!is_valid_api_key("sk-ant\x00key"));
+        assert!(!is_valid_api_key("sk-ant\x1Fkey"));
+    }
+
+    #[test]
+    fn invalid_api_key_with_space() {
+        assert!(!is_valid_api_key("sk ant key"));
+    }
+
+    #[test]
+    fn invalid_api_key_with_tab() {
+        assert!(!is_valid_api_key("sk\tant"));
+    }
 }
 
 #[derive(Serialize)]
@@ -154,7 +204,7 @@ pub(crate) async fn put_settings_handler(
         return Ok((StatusCode::BAD_REQUEST, "Invalid model identifier").into_response());
     }
     if let Some(api_key) = &body.api_key {
-        if api_key.is_empty() || api_key.len() > 256 {
+        if !is_valid_api_key(api_key) {
             return Ok((StatusCode::BAD_REQUEST, "Invalid API key").into_response());
         }
         if state.config.use_iam_creds {

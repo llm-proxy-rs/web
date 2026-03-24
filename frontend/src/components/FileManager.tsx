@@ -89,7 +89,7 @@ export default function FileManager({ onClose }: { onClose?: () => void }) {
           body: JSON.stringify({ path }),
         });
         if (res.ok) {
-          loadDir(currentPath);
+          setEntries((prev) => prev.filter((e) => e.name !== name));
         } else {
           const text = await res.text();
           setError(`Delete failed: ${text}`);
@@ -98,7 +98,7 @@ export default function FileManager({ onClose }: { onClose?: () => void }) {
         setError("Delete failed: network error.");
       }
     },
-    [csrfFetch, currentPath, loadDir],
+    [csrfFetch],
   );
 
   useEffect(() => {

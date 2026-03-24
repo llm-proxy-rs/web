@@ -134,21 +134,45 @@ impl FromRequestParts<AppState> for UserVm {
                     )
                         .into_response());
                 }
-                let user_vm = provision_new_vm(state, db_user.id)
+                let (guard, vm_id, guest_ip, vm) = create_new_vm(state, db_user.id)
                     .await
                     .map_err(IntoResponse::into_response)?;
-                // Write settings to the freshly provisioned VM
-                write_initial_settings(parts, state, user_vm.guest_ip)
+                // Write settings before registering so the VM is never
+                // visible as "ready" without its API key / config.
+                write_initial_settings(parts, state, guest_ip)
                     .await
-                    .map_err(|e| {
-                        error!("failed to write initial settings: {e:#}");
+                    .map_err(|_| {
+                        error!("failed to write initial settings");
                         (
                             StatusCode::INTERNAL_SERVER_ERROR,
                             "An internal error occurred",
                         )
                             .into_response()
                     })?;
-                return Ok(user_vm);
+                register_vm(
+                    &state.vms,
+                    vm_id.clone(),
+                    VmEntry {
+                        user_id: db_user.id,
+                        has_iam_creds: state.config.use_iam_creds,
+                        last_activity: Instant::now(),
+                        vm,
+                    },
+                )
+                .map_err(|_| {
+                    error!("failed to register VM");
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "An internal error occurred",
+                    )
+                        .into_response()
+                })?;
+                drop(guard);
+                return Ok(UserVm {
+                    user_id: db_user.id,
+                    vm_id,
+                    guest_ip,
+                });
             }
         };
         Ok(UserVm {
@@ -159,7 +183,7 @@ impl FromRequestParts<AppState> for UserVm {
     }
 }
 
-/// Best-effort write of initial settings to a freshly provisioned VM.
+/// Writes initial settings to a freshly provisioned VM.
 /// If a gateway API key is available in the session, writes API key settings.
 /// Otherwise, if using Bedrock/IAM mode, writes Bedrock default settings so the
 /// VM has the correct model IDs from the server config (not baked into the rootfs).
@@ -199,6 +223,7 @@ async fn write_initial_settings(
 
 /// Best-effort write of gateway API key settings to a VM using a pre-extracted key.
 /// Used by the background provisioning path where session is not available.
+/// Callers are responsible for handling errors (e.g. removing the VM from the registry).
 async fn write_gateway_settings_with_key(
     state: &AppState,
     guest_ip: Ipv4Addr,
@@ -316,17 +341,37 @@ pub(crate) async fn vm_status_handler(
     // Spawn provisioning in background
     let state_clone = state.clone();
     tokio::spawn(async move {
-        match provision_new_vm(&state_clone, user_id).await {
-            Ok(user_vm) => {
-                // Write gateway settings if available, otherwise write bedrock defaults
-                let result = if let Some(key) = gateway_key {
-                    write_gateway_settings_with_key(&state_clone, user_vm.guest_ip, &key).await
-                } else {
-                    write_bedrock_settings(&state_clone, user_vm.guest_ip).await
-                };
-                if result.is_err() {
-                    error!("failed to write settings to VM");
+        match create_new_vm(&state_clone, user_id).await {
+            Ok((guard, vm_id, guest_ip, vm)) => {
+                // Write settings before registering so the VM is not visible
+                // as "ready" until the API key / bedrock config is in place.
+                // Retry a few times in case the VM's SSH is not ready yet.
+                for _ in 0..5 {
+                    let result = if let Some(ref key) = gateway_key {
+                        write_gateway_settings_with_key(&state_clone, guest_ip, key).await
+                    } else {
+                        write_bedrock_settings(&state_clone, guest_ip).await
+                    };
+                    if result.is_ok() {
+                        break;
+                    }
+                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
                 }
+                if register_vm(
+                    &state_clone.vms,
+                    vm_id,
+                    VmEntry {
+                        user_id,
+                        has_iam_creds: state_clone.config.use_iam_creds,
+                        last_activity: Instant::now(),
+                        vm,
+                    },
+                )
+                .is_err()
+                {
+                    error!("failed to register VM");
+                }
+                drop(guard);
             }
             Err(_) => {
                 error!("background vm provisioning failed");
@@ -406,12 +451,19 @@ impl Drop for ProvisioningGuard {
     }
 }
 
-pub(crate) async fn provision_new_vm(state: &AppState, user_id: Uuid) -> Result<UserVm, AppError> {
+/// Creates a new VM without registering it. Returns the provisioning guard
+/// (which keeps the user in the provisioning set), the VM ID, guest IP, and
+/// the VM handle. The caller is responsible for calling `register_vm` when
+/// the VM is ready to be visible as "ready".
+async fn create_new_vm(
+    state: &AppState,
+    user_id: Uuid,
+) -> Result<(ProvisioningGuard, String, Ipv4Addr, firecracker_manager::Vm), AppError> {
     // acquire_provisioning_slot locks vms + provisioning_users, performs all
     // checks, inserts user_id into the provisioning set, then drops both locks
-    // before returning. The _guard keeps user_id in the set for the duration of
-    // this function; its Drop impl removes it (on success or error).
-    let _guard = acquire_provisioning_slot(state, user_id)?;
+    // before returning. The guard keeps user_id in the set for the duration of
+    // the caller; its Drop impl removes it (on success or error).
+    let guard = acquire_provisioning_slot(state, user_id)?;
     info!("building vm config");
     let user_rootfs = ensure_user_rootfs(
         &state.config.user_rootfs_dir,
@@ -432,21 +484,7 @@ pub(crate) async fn provision_new_vm(state: &AppState, user_id: Uuid) -> Result<
     info!("vm started");
     let vm_id = vm.id.clone();
     let guest_ip = vm.guest_ip();
-    register_vm(
-        &state.vms,
-        vm_id.clone(),
-        VmEntry {
-            user_id,
-            has_iam_creds: state.config.use_iam_creds,
-            last_activity: Instant::now(),
-            vm,
-        },
-    )?;
-    Ok(UserVm {
-        user_id,
-        vm_id,
-        guest_ip,
-    })
+    Ok((guard, vm_id, guest_ip, vm))
 }
 
 async fn build_terminal_response(

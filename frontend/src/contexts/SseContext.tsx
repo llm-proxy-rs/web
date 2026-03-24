@@ -107,8 +107,11 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (vmId !== "") return;
     let cancelled = false;
+    const MAX_ATTEMPTS = 90; // ~3 minutes at 2s intervals
     const poll = async () => {
-      while (!cancelled) {
+      let attempts = 0;
+      while (!cancelled && attempts < MAX_ATTEMPTS) {
+        attempts++;
         try {
           const res = await fetch("/api/vm-status");
           // If redirected to login page, navigate there
