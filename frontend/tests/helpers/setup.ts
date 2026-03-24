@@ -614,7 +614,9 @@ export async function setupApp(
   if (opts.vmId === "") {
     await page.waitForSelector("text=Starting environment");
   } else {
-    await page.waitForSelector('textarea[placeholder="Message Claude…"]');
+    await page.waitForSelector(
+      'textarea[placeholder="Message Claude…"], textarea[placeholder="Type to queue a message…"]',
+    );
   }
 
   return {
@@ -656,7 +658,9 @@ export async function setupApp(
 
 /** Fill the composer and submit with Enter. */
 export async function sendMessage(page: Page, text: string): Promise<void> {
-  const composer = page.getByPlaceholder("Message Claude…");
+  const composer = page.locator(
+    'textarea[placeholder="Message Claude…"], textarea[placeholder="Type to queue a message…"]',
+  );
   await composer.fill(text);
   await composer.press("Enter");
 }

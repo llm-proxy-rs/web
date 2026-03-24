@@ -9,6 +9,7 @@ interface ChatComposerProps {
   onStop: () => void;
   focusKey?: number;
   droppedFiles?: File[];
+  queuedCount?: number;
 }
 
 export default function ChatComposer({
@@ -17,6 +18,7 @@ export default function ChatComposer({
   onStop,
   focusKey,
   droppedFiles,
+  queuedCount = 0,
 }: ChatComposerProps) {
   const { uploadAction, uploadDir, csrfFetch } = useSse();
 
@@ -47,21 +49,7 @@ export default function ChatComposer({
     }
   }, [isLoading]);
 
-  // Global Esc key handler — textarea is disabled during streaming, so onKeyDown won't fire
-  useEffect(() => {
-    if (!isLoading) return;
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onStop();
-      }
-    };
-    window.addEventListener("keydown", handleEsc);
-    return () => window.removeEventListener("keydown", handleEsc);
-  }, [isLoading, onStop]);
-
   const busy = isLoading || uploading;
-  const blocked = busy;
 
   const addFiles = useCallback((files: File[]) => {
     if (files.length === 0) return;
@@ -112,7 +100,7 @@ export default function ChatComposer({
   const handleSend = useCallback(async () => {
     const text = input.trim();
     if (!text && pendingFiles.length === 0) return;
-    if (blocked || uploading) return;
+    if (uploading) return;
 
     let finalText = text;
 
@@ -151,7 +139,6 @@ export default function ChatComposer({
     onSend(finalText);
   }, [
     input,
-    blocked,
     uploading,
     pendingFiles,
     uploadAction,
@@ -162,12 +149,17 @@ export default function ChatComposer({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key === "Escape" && isLoading) {
+        e.preventDefault();
+        onStop();
+        return;
+      }
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         handleSend();
       }
     },
-    [handleSend],
+    [handleSend, isLoading, onStop],
   );
 
   const handleInput = useCallback((e: React.FormEvent<HTMLTextAreaElement>) => {
@@ -224,7 +216,7 @@ export default function ChatComposer({
               type="button"
               title="Attach file"
               onClick={() => fileInputRef.current?.click()}
-              disabled={blocked}
+              disabled={uploading}
               className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
             >
               <Paperclip className="h-4 w-4" />
@@ -242,40 +234,49 @@ export default function ChatComposer({
               value={input}
               onInput={handleInput}
               onKeyDown={handleKeyDown}
-              placeholder="Message Claude…"
-              disabled={blocked}
+              placeholder={
+                isLoading ? "Type to queue a message…" : "Message Claude…"
+              }
               rows={1}
-              className="max-h-[260px] min-h-[32px] flex-1 resize-none bg-transparent py-[5px] text-base leading-snug text-foreground placeholder-muted-foreground/40 focus:outline-none disabled:opacity-60"
+              className="max-h-[260px] min-h-[32px] flex-1 resize-none bg-transparent py-[5px] text-base leading-snug text-foreground placeholder-muted-foreground/40 focus:outline-none"
               style={{ height: "32px" }}
             />
 
             <ModelChip />
 
+            {/* Queued messages indicator */}
+            {queuedCount > 0 && (
+              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary/15 px-1.5 text-xs font-medium text-primary">
+                {queuedCount}
+              </span>
+            )}
+
             {uploading ? (
               <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-muted">
                 <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-border border-t-primary" />
               </div>
-            ) : busy ? (
-              <button
-                type="button"
-                onClick={onStop}
-                title="Stop (Esc)"
-                className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-destructive text-destructive-foreground shadow-sm hover:opacity-90"
-              >
-                <Square className="h-3.5 w-3.5" />
-              </button>
             ) : (
-              <button
-                type="button"
-                onClick={handleSend}
-                disabled={
-                  blocked || (!input.trim() && pendingFiles.length === 0)
-                }
-                title="Send"
-                className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-md shadow-primary/25 hover:shadow-lg hover:shadow-primary/35 disabled:bg-muted disabled:text-muted-foreground disabled:opacity-50 disabled:shadow-none"
-              >
-                <Send className="h-3.5 w-3.5" />
-              </button>
+              <div className="flex items-center gap-1.5">
+                {busy && (
+                  <button
+                    type="button"
+                    onClick={onStop}
+                    title="Stop (Esc)"
+                    className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-destructive text-destructive-foreground shadow-sm hover:opacity-90"
+                  >
+                    <Square className="h-3.5 w-3.5" />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleSend}
+                  disabled={!input.trim() && pendingFiles.length === 0}
+                  title={busy ? "Queue message" : "Send"}
+                  className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-md shadow-primary/25 hover:shadow-lg hover:shadow-primary/35 disabled:bg-muted disabled:text-muted-foreground disabled:opacity-50 disabled:shadow-none"
+                >
+                  <Send className="h-3.5 w-3.5" />
+                </button>
+              </div>
             )}
           </div>
         </div>

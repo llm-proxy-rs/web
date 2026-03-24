@@ -114,7 +114,9 @@ test.describe("assistant response - status position", () => {
     // The status should be positioned after the messages pane and before the composer
     // Verify it's outside the scroll container by checking it's a sibling of the composer area
     const statusBox = await status.boundingBox();
-    const composer = page.locator('textarea[placeholder="Message Claude…"]');
+    const composer = page.locator(
+      'textarea[placeholder="Message Claude…"], textarea[placeholder="Type to queue a message…"]',
+    );
     const composerBox = await composer.boundingBox();
 
     // Status should be above the composer

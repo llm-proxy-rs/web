@@ -1,6 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { ChevronRight, Download, Folder, File, Trash2, Upload, X } from "lucide-react";
+import {
+  ChevronRight,
+  Download,
+  Folder,
+  File,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
 import { useSse } from "../contexts/SseContext";
 import type { FileEntry } from "../types";
 
