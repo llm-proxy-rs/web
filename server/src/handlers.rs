@@ -1,9 +1,3 @@
-use crate::{
-    auth::User,
-    csrf::get_csrf_token,
-    state::{AppError, AppState, find_user_vm},
-    templates::render_terminal_page,
-};
 use anyhow::{Context, Result, anyhow};
 use axum::{
     Json,
@@ -39,6 +33,13 @@ use uuid::Uuid;
 use vm_lifecycle::{
     VmEntry, VmRegistry, build_user_rootfs_path, build_vm_config, build_vm_config_without_iam,
     ensure_user_rootfs, fetch_host_iam_credentials, find_user_rootfs,
+};
+
+use crate::{
+    auth::User,
+    csrf::get_csrf_token,
+    state::{AppError, AppState, find_user_vm},
+    templates::render_terminal_page,
 };
 
 const LOCK_TIMEOUT_SECS: u64 = 30;

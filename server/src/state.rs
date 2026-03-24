@@ -1,4 +1,3 @@
-use crate::static_files::StaticAssets;
 use anyhow::{Result, anyhow};
 use axum::{
     http::StatusCode,
@@ -18,6 +17,8 @@ use tokio::sync::Mutex as AsyncMutex;
 use tracing::error;
 use uuid::Uuid;
 use vm_lifecycle::{VmBuildConfig, VmRegistry};
+
+use crate::static_files::StaticAssets;
 
 #[derive(Clone, Deserialize)]
 pub(crate) struct AppConfig {

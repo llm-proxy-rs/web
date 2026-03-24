@@ -1,7 +1,3 @@
-use crate::{
-    handlers::UserVm,
-    state::{AppConfig, AppError, AppState},
-};
 use anyhow::{Context, Result};
 use authorize::AuthorizeUrlBuilder;
 use axum::{
@@ -12,6 +8,11 @@ use axum::{
 use serde::Deserialize;
 use token::TokenRequestBuilder;
 use tower_sessions::Session;
+
+use crate::{
+    handlers::UserVm,
+    state::{AppConfig, AppError, AppState},
+};
 
 #[derive(Deserialize)]
 struct ApiKeyResponse {

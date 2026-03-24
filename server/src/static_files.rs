@@ -1,4 +1,3 @@
-use crate::state::{AppError, AppState};
 use anyhow::Context;
 use axum::{
     body::Body,
@@ -9,6 +8,8 @@ use axum::{
 use std::path::{self, PathBuf};
 use tokio::fs::File;
 use tokio_util::io::ReaderStream;
+
+use crate::state::{AppError, AppState};
 
 pub(crate) struct StaticAssets {
     pub(crate) app_js_path: PathBuf,

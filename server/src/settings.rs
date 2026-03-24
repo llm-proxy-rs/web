@@ -1,8 +1,3 @@
-use crate::{
-    gateway_auth::is_gateway_configured,
-    handlers::UserVm,
-    state::{AppError, AppState},
-};
 use anyhow::{Context, Result};
 use axum::{
     Json,
@@ -14,6 +9,12 @@ use chat_settings::{
     build_api_key_settings_json, get_vm_settings, get_vm_settings_raw, set_vm_settings,
 };
 use serde::{Deserialize, Serialize};
+
+use crate::{
+    gateway_auth::is_gateway_configured,
+    handlers::UserVm,
+    state::{AppError, AppState},
+};
 
 /// Only allow model identifiers that look like valid model strings.
 /// Rejects arbitrary user input to prevent abuse.

@@ -1,8 +1,3 @@
-use crate::{
-    gateway_auth::{initiate_gateway_login, is_gateway_configured},
-    state::{AppError, AppState},
-    templates::render_login_page,
-};
 use axum::{
     extract::{FromRequestParts, Query, State},
     http::{StatusCode, request::Parts},
@@ -12,6 +7,12 @@ use handlers::{AppState as CognitoState, CallbackQuery, callback, login};
 use store::upsert_user;
 use tower_sessions::Session;
 use tracing::error;
+
+use crate::{
+    gateway_auth::{initiate_gateway_login, is_gateway_configured},
+    state::{AppError, AppState},
+    templates::render_login_page,
+};
 
 pub(crate) struct User {
     pub(crate) email: String,

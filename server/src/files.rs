@@ -1,7 +1,3 @@
-use crate::{
-    handlers::UserVm,
-    state::{AppError, AppState},
-};
 use anyhow::{Context, Result};
 use axum::{
     Json,
@@ -19,6 +15,11 @@ use std::{
     time::Duration,
 };
 use tokio::time::timeout;
+
+use crate::{
+    handlers::UserVm,
+    state::{AppError, AppState},
+};
 
 const SFTP_OP_TIMEOUT_SECS: u64 = 30;
 

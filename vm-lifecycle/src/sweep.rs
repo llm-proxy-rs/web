@@ -35,8 +35,8 @@ pub async fn sweep_idle_vms(
     }
 
     info!("saving rootfs for {} swept vm(s)", stale_vms.len());
-    if let Err(e) = fs::create_dir_all(user_rootfs_dir).await {
-        warn!("failed to create user rootfs dir during sweep: {e}");
+    if fs::create_dir_all(user_rootfs_dir).await.is_err() {
+        warn!("failed to create user rootfs dir during sweep");
         return;
     }
     let Ok(_guard) = timeout(Duration::from_secs(LOCK_TIMEOUT_SECS), rootfs_lock.lock()).await
@@ -46,8 +46,8 @@ pub async fn sweep_idle_vms(
     };
     for vm_entry in &stale_vms {
         let rootfs_path = build_user_rootfs_path(user_rootfs_dir, vm_entry.user_id);
-        if let Err(e) = vm_entry.vm.save_rootfs(&rootfs_path).await {
-            warn!(dest = %rootfs_path.display(), "failed to save rootfs during sweep: {e}");
+        if vm_entry.vm.save_rootfs(&rootfs_path).await.is_err() {
+            warn!(dest = %rootfs_path.display(), "failed to save rootfs during sweep");
         }
     }
 }

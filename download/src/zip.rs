@@ -49,10 +49,19 @@ async fn write_zip(
 ) {
     let mut zip = ZipFileWriter::with_tokio(writer);
     match write_zip_entries(&sftp, &dir_path, &upload_dir, &mut zip).await {
-        Err(err) => tracing::warn!("zip write failed: {err}"),
+        Err(_) => {
+            // Drop zip (and its inner DuplexStream) without shutdown so the
+            // reader gets an Err rather than a clean EOF, preventing the client
+            // from treating a partial stream as a valid zip.
+        }
         Ok(()) => {
-            if let Err(err) = zip.close().await.context("failed to close zip archive") {
-                tracing::warn!("zip close failed: {err}");
+            match zip.close().await.context("failed to close zip archive") {
+                Err(_) => {}
+                // close() returns the inner writer; shut it down cleanly so
+                // the reader gets a proper EOF.
+                Ok(mut writer) => {
+                    let _ = futures_lite::io::AsyncWriteExt::close(&mut writer).await;
+                }
             }
         }
     }

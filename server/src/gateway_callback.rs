@@ -1,8 +1,3 @@
-use crate::{
-    auth::User,
-    gateway_auth::{exchange_gateway_code, provision_gateway_api_key},
-    state::{AppError, AppState},
-};
 use anyhow::Context;
 use axum::{
     extract::{Query, State},
@@ -11,6 +6,12 @@ use axum::{
 use serde::Deserialize;
 use tower_sessions::Session;
 use tracing::{error, info};
+
+use crate::{
+    auth::User,
+    gateway_auth::{exchange_gateway_code, provision_gateway_api_key},
+    state::{AppError, AppState},
+};
 
 #[derive(Deserialize)]
 pub(crate) struct GatewayCallbackQuery {

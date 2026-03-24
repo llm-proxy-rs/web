@@ -13,6 +13,24 @@ mod templates;
 mod terminal;
 mod upload;
 
+use anyhow::{Context, Result};
+use axum::{
+    Router,
+    extract::{DefaultBodyLimit, Request},
+    http::HeaderValue,
+    middleware::{self, Next},
+    response::Response,
+    routing::{get, post},
+};
+use firecracker_manager::{cleanup_stale_vms, setup_host_networking};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use time::Duration;
+use tokio::{net::TcpListener, signal, sync::oneshot, task::AbortHandle};
+use tower_sessions::{ExpiredDeletion, Expiry, SessionManagerLayer, cookie::SameSite};
+use tower_sessions_sqlx_store::PostgresStore;
+use tracing::info;
+use vm_lifecycle::{refresh_all_vm_mmds, save_all_vm_rootfs, sweep_idle_vms};
+
 use crate::{
     auth::{
         get_callback_handler, get_cognito_login_handler, get_login_handler, get_logout_handler,
@@ -36,23 +54,6 @@ use crate::{
     terminal::handle_ws_upgrade,
     upload::upload_file_handler,
 };
-use anyhow::{Context, Result};
-use axum::{
-    Router,
-    extract::{DefaultBodyLimit, Request},
-    http::HeaderValue,
-    middleware::{self, Next},
-    response::Response,
-    routing::{get, post},
-};
-use firecracker_manager::{cleanup_stale_vms, setup_host_networking};
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use time::Duration;
-use tokio::{net::TcpListener, signal, sync::oneshot, task::AbortHandle};
-use tower_sessions::{ExpiredDeletion, Expiry, SessionManagerLayer, cookie::SameSite};
-use tower_sessions_sqlx_store::PostgresStore;
-use tracing::info;
-use vm_lifecycle::{refresh_all_vm_mmds, save_all_vm_rootfs, sweep_idle_vms};
 
 #[tokio::main]
 async fn main() -> Result<()> {

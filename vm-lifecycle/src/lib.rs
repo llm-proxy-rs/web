@@ -1,3 +1,4 @@
+use firecracker_manager::Vm;
 use std::{
     collections::HashMap,
     path::PathBuf,
@@ -5,8 +6,6 @@ use std::{
     time::Instant,
 };
 use uuid::Uuid;
-
-use firecracker_manager::Vm;
 
 mod iam;
 mod mmds;

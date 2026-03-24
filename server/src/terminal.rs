@@ -1,7 +1,3 @@
-use crate::{
-    handlers::UserVm,
-    state::{AppError, AppState, update_vm_last_activity},
-};
 use anyhow::{Context, Result, bail};
 use axum::{
     Error as AxumError,
@@ -22,6 +18,11 @@ use tracing::{error, info, warn};
 use url::Url;
 use uuid::Uuid;
 use vm_lifecycle::{VmEntry, build_user_rootfs_path};
+
+use crate::{
+    handlers::UserVm,
+    state::{AppError, AppState, update_vm_last_activity},
+};
 
 const LOCK_TIMEOUT_SECS: u64 = 30;
 const SEND_TIMEOUT_SECS: u64 = 30;
