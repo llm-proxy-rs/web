@@ -1,13 +1,15 @@
 /**
- * Message queue — type and queue messages while Claude is streaming
+ * Message queue drawer — type and queue messages while Claude is streaming
  *
  * UF-80  Composer enabled during streaming — textarea is not disabled while loading
- * UF-81  Queue a message during streaming — user message appears immediately, queued badge shows
+ * UF-81  Queued message appears in drawer — drawer shows queued text, not in chat bubbles
  * UF-82  Queued message auto-sends after response — next message dispatches when stream completes
  * UF-83  Multiple queued messages drain sequentially — each queued message sends after the previous finishes
- * UF-84  Placeholder changes during streaming — shows "Type to queue a message…" while loading
+ * UF-84  Placeholder changes during streaming — shows pending count when items are queued
  * UF-85  Stop button visible alongside send during streaming — both buttons present
  * UF-86  Queue clears on New Chat — switching to new chat discards the queue
+ * UF-87  Remove a queued message via X button — clicking X removes item from drawer
+ * UF-88  Clear all queued messages — "Clear all" button empties the queue
  */
 import { test, expect } from "@playwright/test";
 import { setupApp, sendMessage, sse } from "./helpers/setup";
@@ -18,39 +20,38 @@ test.describe("message queue", () => {
   }) => {
     await setupApp(page, {});
 
-    // Send a message — stream starts (no events sent so it stays loading)
     await sendMessage(page, "Hello");
 
-    // The textarea should still be enabled (not disabled)
     const composer = page.locator("textarea");
     await expect(composer).toBeEnabled();
-    await expect(composer).toHaveAttribute(
-      "placeholder",
-      "Type to queue a message…",
-    );
   });
 
-  test("UF-81 queued message appears in chat immediately with badge", async ({
+  test("UF-81 queued message appears in drawer, not as chat bubble", async ({
     page,
   }) => {
     await setupApp(page, {});
 
     // Start streaming
     await sendMessage(page, "First message");
-
-    // Status bar should be visible (streaming)
     await expect(page.getByRole("status")).toBeVisible();
 
-    // Type and send another message while streaming
+    // Queue a second message
     await sendMessage(page, "Queued message");
 
-    // The queued user message should appear in the chat immediately
+    // The drawer header should appear
+    await expect(page.getByText("Queued messages (1)")).toBeVisible();
+    // The queued text should appear in the drawer
     await expect(
-      page.getByRole("main").getByText("Queued message"),
+      page.locator(".fade-in-up").getByText("Queued message"),
     ).toBeVisible();
 
-    // A badge showing "1" should appear (queued count)
-    await expect(page.locator("span").filter({ hasText: /^1$/ })).toBeVisible();
+    // The queued message should NOT appear as a chat bubble in the messages pane
+    // Only "First message" should be in the main area
+    const mainMessages = page
+      .getByRole("main")
+      .locator('[class*="user"]')
+      .filter({ hasText: "Queued message" });
+    await expect(mainMessages).toHaveCount(0);
   });
 
   test("UF-82 queued message auto-sends after response completes", async ({
@@ -58,17 +59,17 @@ test.describe("message queue", () => {
   }) => {
     const ctrl = await setupApp(page, {});
 
-    // Start streaming
     await sendMessage(page, "First");
-
-    // Queue a second message while streaming
     await sendMessage(page, "Second");
+
+    // Drawer shows 1 queued
+    await expect(page.getByText("Queued messages (1)")).toBeVisible();
 
     // Complete the first stream
     ctrl.sendSseEvents(sse.text("Response to first", "sess-1"));
     await expect(page.getByText("Response to first")).toBeVisible();
 
-    // The queued message should auto-dispatch — queue events for it
+    // The queued message should auto-dispatch
     ctrl.sendSseEvents(sse.text("Response to second", "sess-2"));
     await expect(page.getByText("Response to second")).toBeVisible();
 
@@ -84,22 +85,19 @@ test.describe("message queue", () => {
   }) => {
     const ctrl = await setupApp(page, {});
 
-    // Start streaming
     await sendMessage(page, "First");
-
-    // Queue two more messages
     await sendMessage(page, "Second");
     await sendMessage(page, "Third");
 
-    // Badge should show "2"
-    await expect(page.locator("span").filter({ hasText: /^2$/ })).toBeVisible();
+    // Drawer should show 2 queued items
+    await expect(page.getByText("Queued messages (2)")).toBeVisible();
 
     // Complete first stream → "Second" auto-dispatches
     ctrl.sendSseEvents(sse.text("R1", "sess-1"));
     await expect(page.getByText("R1")).toBeVisible();
 
-    // Badge should now show "1"
-    await expect(page.locator("span").filter({ hasText: /^1$/ })).toBeVisible();
+    // Drawer should now show 1 queued item
+    await expect(page.getByText("Queued messages (1)")).toBeVisible();
 
     // Complete second stream → "Third" auto-dispatches
     ctrl.sendSseEvents(sse.text("R2", "sess-2"));
@@ -117,8 +115,10 @@ test.describe("message queue", () => {
     expect(bodies[2].content).toBe("Third");
   });
 
-  test("UF-84 placeholder changes during streaming", async ({ page }) => {
-    const ctrl = await setupApp(page, {});
+  test("UF-84 placeholder shows pending count when items are queued", async ({
+    page,
+  }) => {
+    await setupApp(page, {});
 
     // Before sending — normal placeholder
     await expect(page.locator("textarea")).toHaveAttribute(
@@ -129,18 +129,17 @@ test.describe("message queue", () => {
     // Start streaming
     await sendMessage(page, "Hello");
 
-    // During streaming — queue placeholder
+    // During streaming with no queue — basic queue placeholder
     await expect(page.locator("textarea")).toHaveAttribute(
       "placeholder",
       "Type to queue a message…",
     );
 
-    // Complete stream — back to normal
-    ctrl.sendSseEvents(sse.text("Hi", "sess-1"));
-    await expect(page.getByRole("status")).not.toBeVisible();
+    // Queue a message — placeholder shows count
+    await sendMessage(page, "Queued");
     await expect(page.locator("textarea")).toHaveAttribute(
       "placeholder",
-      "Message Claude…",
+      "Type to queue a message (1 pending)…",
     );
   });
 
@@ -151,11 +150,9 @@ test.describe("message queue", () => {
 
     await sendMessage(page, "Hello");
 
-    // Type something in the composer while streaming
     const composer = page.locator("textarea");
     await composer.fill("queued text");
 
-    // Both stop and send buttons should be visible
     await expect(page.getByTitle("Stop (Esc)")).toBeVisible();
     await expect(page.getByTitle("Queue message")).toBeVisible();
   });
@@ -163,19 +160,51 @@ test.describe("message queue", () => {
   test("UF-86 switching to New Chat clears the queue", async ({ page }) => {
     await setupApp(page, {});
 
-    // Start streaming and queue a message
     await sendMessage(page, "First");
     await sendMessage(page, "Queued");
 
-    // Badge visible
-    await expect(page.locator("span").filter({ hasText: /^1$/ })).toBeVisible();
+    await expect(page.getByText("Queued messages (1)")).toBeVisible();
 
-    // Click New Chat
     await page.getByRole("button", { name: "New Chat" }).click();
 
-    // Queue badge should be gone
-    await expect(
-      page.locator("span").filter({ hasText: /^1$/ }),
-    ).not.toBeVisible();
+    // Drawer should be gone
+    await expect(page.getByText("Queued messages")).not.toBeVisible();
+  });
+
+  test("UF-87 clicking X removes a queued message from the drawer", async ({
+    page,
+  }) => {
+    await setupApp(page, {});
+
+    await sendMessage(page, "First");
+    await sendMessage(page, "Remove me");
+    await sendMessage(page, "Keep me");
+
+    await expect(page.getByText("Queued messages (2)")).toBeVisible();
+
+    // Click the X button on the first queued item ("Remove me")
+    const removeButtons = page.locator('button[title="Remove from queue"]');
+    await removeButtons.first().click();
+
+    // Should now show 1 queued item
+    await expect(page.getByText("Queued messages (1)")).toBeVisible();
+    // "Remove me" should be gone, "Keep me" should remain
+    await expect(page.getByText("Remove me")).not.toBeVisible();
+    await expect(page.getByText("Keep me")).toBeVisible();
+  });
+
+  test("UF-88 clear all empties the queue", async ({ page }) => {
+    await setupApp(page, {});
+
+    await sendMessage(page, "First");
+    await sendMessage(page, "Second queued");
+    await sendMessage(page, "Third queued");
+
+    await expect(page.getByText("Queued messages (2)")).toBeVisible();
+    // "Clear all" button appears when there are 2+ items
+    await page.getByText("Clear all").click();
+
+    // Drawer should be gone
+    await expect(page.getByText("Queued messages")).not.toBeVisible();
   });
 });

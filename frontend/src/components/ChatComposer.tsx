@@ -235,7 +235,11 @@ export default function ChatComposer({
               onInput={handleInput}
               onKeyDown={handleKeyDown}
               placeholder={
-                isLoading ? "Type to queue a message…" : "Message Claude…"
+                isLoading
+                  ? queuedCount > 0
+                    ? `Type to queue a message (${queuedCount} pending)…`
+                    : "Type to queue a message…"
+                  : "Message Claude…"
               }
               rows={1}
               className="max-h-[260px] min-h-[32px] flex-1 resize-none bg-transparent py-[5px] text-base leading-snug text-foreground placeholder-muted-foreground/40 focus:outline-none"
@@ -243,13 +247,6 @@ export default function ChatComposer({
             />
 
             <ModelChip />
-
-            {/* Queued messages indicator */}
-            {queuedCount > 0 && (
-              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary/15 px-1.5 text-xs font-medium text-primary">
-                {queuedCount}
-              </span>
-            )}
 
             {uploading ? (
               <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-muted">

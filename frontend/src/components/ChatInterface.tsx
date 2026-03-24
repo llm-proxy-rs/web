@@ -10,6 +10,7 @@ import AskUserQuestionPanel from "./AskUserQuestionPanel";
 import ChatComposer from "./ChatComposer";
 import ChatMessagesPane from "./ChatMessagesPane";
 import ClaudeStatus from "./ClaudeStatus";
+import QueueDrawer from "./QueueDrawer";
 
 interface ChatInterfaceProps {
   selectedConversation: Conversation | null;
@@ -41,8 +42,7 @@ export default function ChatInterface({
   const [composerFocusKey, setComposerFocusKey] = useState(0);
 
   // Message queue: messages sent while a conversation is streaming
-  const messageQueueRef = useRef<string[]>([]);
-  const [queuedCount, setQueuedCount] = useState(0);
+  const [messageQueue, setMessageQueue] = useState<string[]>([]);
 
   const {
     viewConversationId,
@@ -70,8 +70,7 @@ export default function ChatInterface({
       return;
     }
     setViewConversationId(null);
-    messageQueueRef.current = [];
-    setQueuedCount(0);
+    setMessageQueue([]);
     setComposerFocusKey((k) => k + 1);
   }, [newChatKey, setViewConversationId]);
 
@@ -140,8 +139,7 @@ export default function ChatInterface({
   useEffect(() => {
     if (!selectedConversation) {
       setViewConversationId(null);
-      messageQueueRef.current = [];
-      setQueuedCount(0);
+      setMessageQueue([]);
       setComposerFocusKey((k) => k + 1);
       return;
     }
@@ -227,26 +225,12 @@ export default function ChatInterface({
         viewConversationId !== null &&
         isConversationRunning(viewConversationId)
       ) {
-        messageQueueRef.current.push(text);
-        setQueuedCount(messageQueueRef.current.length);
-        // Show the queued message in the chat as a user message immediately
-        addMessage(viewConversationId, {
-          id: generateId(),
-          type: "user",
-          content: text,
-          timestamp: Date.now(),
-        });
+        setMessageQueue((q) => [...q, text]);
         return;
       }
       dispatchMessage(text);
     },
-    [
-      viewConversationId,
-      isConversationRunning,
-      dispatchMessage,
-      addMessage,
-      generateId,
-    ],
+    [viewConversationId, isConversationRunning, dispatchMessage],
   );
 
   const handleStop = useCallback(() => {
@@ -306,13 +290,21 @@ export default function ChatInterface({
   useEffect(() => {
     const wasRunning = prevRunningRef.current;
     prevRunningRef.current = isCurrentRunning;
-    if (wasRunning && !isCurrentRunning && messageQueueRef.current.length > 0) {
-      const next = messageQueueRef.current.shift()!;
-      setQueuedCount(messageQueueRef.current.length);
+    if (wasRunning && !isCurrentRunning && messageQueue.length > 0) {
+      const [next, ...rest] = messageQueue;
+      setMessageQueue(rest);
       // Small delay to let the UI settle
       setTimeout(() => dispatchMessage(next), 100);
     }
-  }, [isCurrentRunning, dispatchMessage]);
+  }, [isCurrentRunning, dispatchMessage, messageQueue]);
+
+  const handleRemoveQueued = useCallback((index: number) => {
+    setMessageQueue((q) => q.filter((_, i) => i !== index));
+  }, []);
+
+  const handleClearQueue = useCallback(() => {
+    setMessageQueue([]);
+  }, []);
 
   // Drag-and-drop for the entire message area
   const [dragging, setDragging] = useState(false);
@@ -388,14 +380,21 @@ export default function ChatInterface({
           </div>
         </div>
       ) : (
-        <ChatComposer
-          isLoading={isCurrentRunning}
-          onSend={handleSend}
-          onStop={handleStop}
-          focusKey={composerFocusKey}
-          droppedFiles={droppedFiles}
-          queuedCount={queuedCount}
-        />
+        <>
+          <QueueDrawer
+            messages={messageQueue}
+            onRemove={handleRemoveQueued}
+            onClear={handleClearQueue}
+          />
+          <ChatComposer
+            isLoading={isCurrentRunning}
+            onSend={handleSend}
+            onStop={handleStop}
+            focusKey={composerFocusKey}
+            droppedFiles={droppedFiles}
+            queuedCount={messageQueue.length}
+          />
+        </>
       )}
     </div>
   );
