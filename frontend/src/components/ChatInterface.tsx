@@ -41,9 +41,6 @@ export default function ChatInterface({
 
   const [composerFocusKey, setComposerFocusKey] = useState(0);
 
-  // Message queue: messages sent while a conversation is streaming
-  const [messageQueue, setMessageQueue] = useState<string[]>([]);
-
   const {
     viewConversationId,
     setViewConversationId,
@@ -58,6 +55,11 @@ export default function ChatInterface({
     addMessage,
     setMessages,
     generateId,
+    getQueue,
+    addToQueue,
+    removeFromQueue,
+    clearQueue,
+    shiftQueue,
   } = chatState;
 
   // Fire whenever the user clicks "New Chat" — even if selectedConversation was
@@ -70,7 +72,6 @@ export default function ChatInterface({
       return;
     }
     setViewConversationId(null);
-    setMessageQueue([]);
     setComposerFocusKey((k) => k + 1);
   }, [newChatKey, setViewConversationId]);
 
@@ -139,7 +140,6 @@ export default function ChatInterface({
   useEffect(() => {
     if (!selectedConversation) {
       setViewConversationId(null);
-      setMessageQueue([]);
       setComposerFocusKey((k) => k + 1);
       return;
     }
@@ -177,7 +177,28 @@ export default function ChatInterface({
     onRunningConversationChangeRef.current?.(runningConversationIds);
   }, [runningConversationIds]);
 
-  // Actually dispatch a message (no queue check — called by handleSend and the drain effect)
+  // Dispatch a message to a specific conversation (used by drain effect for queued messages)
+  const dispatchMessageTo = useCallback(
+    (targetConversationId: string, text: string) => {
+      const conversation = conversations.find(
+        (c) => c.conversationId === targetConversationId,
+      );
+      const sessionId = conversation?.sessionId;
+
+      addMessage(targetConversationId, {
+        id: generateId(),
+        type: "user",
+        content: text,
+        timestamp: Date.now(),
+      });
+      addRunningConversation(targetConversationId);
+
+      sseCtx.sendQuery(text, targetConversationId, sessionId);
+    },
+    [conversations, generateId, addMessage, addRunningConversation, sseCtx],
+  );
+
+  // Dispatch a message to the current view (creates a new conversation if needed)
   const dispatchMessage = useCallback(
     (text: string) => {
       let effectiveConversationId = viewConversationId;
@@ -190,31 +211,14 @@ export default function ChatInterface({
         });
         onConversationCreated?.(newConv);
       }
-
-      const conversation = conversations.find(
-        (c) => c.conversationId === effectiveConversationId,
-      );
-      const sessionId = conversation?.sessionId;
-
-      addMessage(effectiveConversationId, {
-        id: generateId(),
-        type: "user",
-        content: text,
-        timestamp: Date.now(),
-      });
-      addRunningConversation(effectiveConversationId);
-
-      sseCtx.sendQuery(text, effectiveConversationId, sessionId);
+      dispatchMessageTo(effectiveConversationId, text);
     },
     [
       viewConversationId,
-      conversations,
-      generateId,
-      addMessage,
-      addRunningConversation,
       setViewConversationId,
       onConversationCreated,
       sseCtx,
+      dispatchMessageTo,
     ],
   );
 
@@ -225,12 +229,12 @@ export default function ChatInterface({
         viewConversationId !== null &&
         isConversationRunning(viewConversationId)
       ) {
-        setMessageQueue((q) => [...q, text]);
+        addToQueue(viewConversationId, text);
         return;
       }
       dispatchMessage(text);
     },
-    [viewConversationId, isConversationRunning, dispatchMessage],
+    [viewConversationId, isConversationRunning, dispatchMessage, addToQueue],
   );
 
   const handleStop = useCallback(() => {
@@ -284,27 +288,35 @@ export default function ChatInterface({
   const isCurrentRunning =
     viewConversationId !== null && isConversationRunning(viewConversationId);
   const streamPhase = chatState.getStreamPhase(viewConversationId);
+  const messageQueue = getQueue(viewConversationId);
 
-  // Drain the message queue when streaming finishes
-  const prevRunningRef = useRef(isCurrentRunning);
+  // Drain queued messages when any conversation stops running.
+  // Compares the current runningConversationIds with the previous snapshot
+  // to find conversations that just finished, then dispatches their next queued message.
+  const prevRunningIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    const wasRunning = prevRunningRef.current;
-    prevRunningRef.current = isCurrentRunning;
-    if (wasRunning && !isCurrentRunning && messageQueue.length > 0) {
-      const [next, ...rest] = messageQueue;
-      setMessageQueue(rest);
-      // Small delay to let the UI settle
-      setTimeout(() => dispatchMessage(next), 100);
+    const prev = prevRunningIdsRef.current;
+    prevRunningIdsRef.current = new Set(runningConversationIds);
+    for (const convId of prev) {
+      if (!runningConversationIds.has(convId)) {
+        const next = shiftQueue(convId);
+        if (next !== undefined) {
+          setTimeout(() => dispatchMessageTo(convId, next), 100);
+        }
+      }
     }
-  }, [isCurrentRunning, dispatchMessage, messageQueue]);
+  }, [runningConversationIds, shiftQueue, dispatchMessageTo]);
 
-  const handleRemoveQueued = useCallback((index: number) => {
-    setMessageQueue((q) => q.filter((_, i) => i !== index));
-  }, []);
+  const handleRemoveQueued = useCallback(
+    (index: number) => {
+      removeFromQueue(viewConversationId, index);
+    },
+    [viewConversationId, removeFromQueue],
+  );
 
   const handleClearQueue = useCallback(() => {
-    setMessageQueue([]);
-  }, []);
+    clearQueue(viewConversationId);
+  }, [viewConversationId, clearQueue]);
 
   // Drag-and-drop for the entire message area
   const [dragging, setDragging] = useState(false);

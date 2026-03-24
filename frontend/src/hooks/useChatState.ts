@@ -40,6 +40,11 @@ export interface ChatStateResult {
     id: string,
     updater: (msg: ChatMessage) => ChatMessage,
   ) => void;
+  getQueue: (conversationId: string | null) => string[];
+  addToQueue: (conversationId: string | null, text: string) => void;
+  removeFromQueue: (conversationId: string | null, index: number) => void;
+  clearQueue: (conversationId: string | null) => void;
+  shiftQueue: (conversationId: string | null) => string | undefined;
   generateId: () => string;
   renderTick: number;
   bumpRender: () => void;
@@ -52,6 +57,7 @@ export function useChatState(): ChatStateResult {
   );
   const taskIdBySession = useRef<Map<string, string>>(new Map());
   const streamPhaseBySession = useRef<Map<string, StreamPhaseInfo>>(new Map());
+  const queueBySession = useRef<Map<string, string[]>>(new Map());
   const [viewConversationId, setViewConversationId] = useState<string | null>(
     null,
   );
@@ -204,6 +210,57 @@ export function useChatState(): ChatStateResult {
     [],
   );
 
+  const getQueue = useCallback((conversationId: string | null): string[] => {
+    if (conversationId === null) return [];
+    return queueBySession.current.get(conversationId) ?? [];
+  }, []);
+
+  const addToQueue = useCallback(
+    (conversationId: string | null, text: string) => {
+      if (conversationId === null) return;
+      const prev = queueBySession.current.get(conversationId) ?? [];
+      queueBySession.current.set(conversationId, [...prev, text]);
+      setRenderTick((t) => t + 1);
+    },
+    [],
+  );
+
+  const removeFromQueue = useCallback(
+    (conversationId: string | null, index: number) => {
+      if (conversationId === null) return;
+      const prev = queueBySession.current.get(conversationId) ?? [];
+      queueBySession.current.set(
+        conversationId,
+        prev.filter((_, i) => i !== index),
+      );
+      setRenderTick((t) => t + 1);
+    },
+    [],
+  );
+
+  const clearQueue = useCallback((conversationId: string | null) => {
+    if (conversationId === null) return;
+    queueBySession.current.delete(conversationId);
+    setRenderTick((t) => t + 1);
+  }, []);
+
+  const shiftQueue = useCallback(
+    (conversationId: string | null): string | undefined => {
+      if (conversationId === null) return undefined;
+      const prev = queueBySession.current.get(conversationId) ?? [];
+      if (prev.length === 0) return undefined;
+      const [first, ...rest] = prev;
+      if (rest.length === 0) {
+        queueBySession.current.delete(conversationId);
+      } else {
+        queueBySession.current.set(conversationId, rest);
+      }
+      setRenderTick((t) => t + 1);
+      return first;
+    },
+    [],
+  );
+
   return {
     messagesBySession,
     viewConversationId,
@@ -224,6 +281,11 @@ export function useChatState(): ChatStateResult {
     removeMessage,
     updateLastMessage,
     updateMessageById,
+    getQueue,
+    addToQueue,
+    removeFromQueue,
+    clearQueue,
+    shiftQueue,
     generateId,
     renderTick,
     bumpRender,

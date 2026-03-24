@@ -157,7 +157,9 @@ test.describe("message queue", () => {
     await expect(page.getByTitle("Queue message")).toBeVisible();
   });
 
-  test("UF-86 switching to New Chat clears the queue", async ({ page }) => {
+  test("UF-86 switching to New Chat hides the queue drawer (queue stays on original conversation)", async ({
+    page,
+  }) => {
     await setupApp(page, {});
 
     await sendMessage(page, "First");
@@ -167,7 +169,7 @@ test.describe("message queue", () => {
 
     await page.getByRole("button", { name: "New Chat" }).click();
 
-    // Drawer should be gone
+    // Drawer should not be visible in the new chat (no queue here)
     await expect(page.getByText("Queued messages")).not.toBeVisible();
   });
 
@@ -206,5 +208,63 @@ test.describe("message queue", () => {
 
     // Drawer should be gone
     await expect(page.getByText("Queued messages")).not.toBeVisible();
+  });
+
+  test("UF-89 queue persists when switching away and back to a conversation", async ({
+    page,
+  }) => {
+    const ctrl = await setupApp(page, {});
+
+    // Send a message in conv-A (starts streaming)
+    await sendMessage(page, "Conv-A message");
+    // Queue a message while streaming
+    await sendMessage(page, "Conv-A queued");
+    await expect(page.getByText("Queued messages (1)")).toBeVisible();
+
+    // Switch to a new chat — conv-A's queue is no longer visible
+    await page.getByRole("button", { name: "New Chat" }).click();
+    await expect(page.getByText("Queued messages")).not.toBeVisible();
+
+    // Click back on conv-A in the sidebar — queue should reappear
+    await page
+      .locator("span.truncate")
+      .filter({ hasText: "Conv-A message" })
+      .click();
+    await expect(page.getByText("Queued messages (1)")).toBeVisible();
+    await expect(page.getByText("Conv-A queued")).toBeVisible();
+  });
+
+  test("UF-90 queued message dispatches to correct conversation even when viewing another", async ({
+    page,
+  }) => {
+    const ctrl = await setupApp(page, {});
+
+    // Send in conv-A and queue
+    await sendMessage(page, "Conv-A first");
+    await sendMessage(page, "Conv-A queued");
+    await expect(page.getByText("Queued messages (1)")).toBeVisible();
+
+    // Switch to new chat before conv-A finishes
+    await page.getByRole("button", { name: "New Chat" }).click();
+
+    // Complete conv-A's stream — the queued message should dispatch to conv-A, not the new chat
+    ctrl.sendSseEvents(sse.text("Response A1", "sess-1"));
+
+    // Queue a second SSE for the auto-dispatched queued message
+    ctrl.sendSseEvents(sse.text("Response A2", "sess-2"));
+
+    // Navigate back to conv-A to verify both messages landed there
+    await page
+      .locator("span.truncate")
+      .filter({ hasText: "Conv-A first" })
+      .click();
+    await expect(page.getByText("Response A1")).toBeVisible();
+    await expect(page.getByText("Conv-A queued")).toBeVisible();
+    await expect(page.getByText("Response A2")).toBeVisible();
+
+    // Verify both POSTs used conv-A's conversation_id
+    const bodies = ctrl.allChatBodies();
+    expect(bodies.length).toBe(2);
+    expect(bodies[0].conversation_id).toBe(bodies[1].conversation_id);
   });
 });
