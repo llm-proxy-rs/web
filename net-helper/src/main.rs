@@ -58,8 +58,8 @@ fn parse_tap_name(name: &str) -> Result<String> {
     if digits.len() > 1 && digits.starts_with('0') {
         bail!("no leading zeros in tap index");
     }
-    let n: u32 = digits.parse().context("invalid number")?;
-    if n > 253 {
+    let tap_index: u32 = digits.parse().context("invalid number")?;
+    if tap_index > 253 {
         bail!("tap index must be 0-253");
     }
     Ok(name.to_owned())

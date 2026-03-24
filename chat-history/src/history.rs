@@ -5,7 +5,7 @@ use ssh_client::connect_ssh;
 use std::{net::Ipv4Addr, path::Path};
 use tokio::io::AsyncReadExt;
 
-use crate::{Content, journal::JournalEntry};
+use crate::{Content, Role, journal::JournalEntry};
 
 #[derive(Serialize)]
 pub struct ChatHistory {
@@ -14,7 +14,7 @@ pub struct ChatHistory {
 
 #[derive(Serialize)]
 pub struct ChatMessage {
-    pub role: String,
+    pub role: Role,
     pub content: Content,
     #[serde(rename = "isCompactSummary")]
     pub is_compact_summary: bool,
@@ -44,27 +44,38 @@ pub(crate) fn parse_chat_history(contents: &str) -> ChatHistory {
     let mut skip_next_assistant = false;
     for entry in contents
         .lines()
+        // Silently skip lines that don't parse: the JSONL file may contain
+        // entry types not covered by JournalEntry, or a truncated last line.
         .filter_map(|line| serde_json::from_str::<JournalEntry>(line).ok())
         .filter(|e| matches!(e.type_.as_str(), "user" | "assistant"))
         // isMeta entries (e.g. <local-command-caveat>) are injected by Claude
         // Code as bookkeeping markers, not real conversation messages.
         .filter(|e| !e.is_meta)
     {
+        // Some entry types (e.g. "custom-title", "file-history-snapshot") have
+        // no message field; skip them.
+        let Some(message) = entry.message else {
+            continue;
+        };
         if entry.is_compact_summary {
-            messages.push(build_compact_summary_message(entry));
+            messages.push(ChatMessage {
+                role: message.role,
+                content: message.content,
+                is_compact_summary: true,
+            });
             continue;
         }
-        if is_slash_command(&entry.message.content) {
+        if is_slash_command(&message.content) {
             // Skip the next assistant entry too: Claude Code writes a synthetic
             // assistant reply (e.g. "No response requested.") after every slash
             // command. That reply is an internal acknowledgment, not real output.
             skip_next_assistant = true;
             continue;
         }
-        if is_local_command_output(&entry.message.content) {
+        if is_local_command_output(&message.content) {
             continue;
         }
-        if is_interrupted_request(&entry.message.content) {
+        if is_interrupted_request(&message.content) {
             continue;
         }
         if entry.type_ == "assistant" && skip_next_assistant {
@@ -72,7 +83,11 @@ pub(crate) fn parse_chat_history(contents: &str) -> ChatHistory {
             continue;
         }
         skip_next_assistant = false;
-        messages.push(build_chat_message(entry));
+        messages.push(ChatMessage {
+            role: message.role,
+            content: message.content,
+            is_compact_summary: false,
+        });
     }
     ChatHistory { messages }
 }
@@ -101,22 +116,6 @@ pub(crate) fn is_interrupted_request(content: &Content) -> bool {
                 .as_deref()
                 .is_some_and(|t| t.starts_with("[Request interrupted by user"))
         }),
-    }
-}
-
-fn build_chat_message(entry: JournalEntry) -> ChatMessage {
-    ChatMessage {
-        role: entry.message.role,
-        content: entry.message.content,
-        is_compact_summary: false,
-    }
-}
-
-fn build_compact_summary_message(entry: JournalEntry) -> ChatMessage {
-    ChatMessage {
-        role: entry.message.role,
-        content: entry.message.content,
-        is_compact_summary: true,
     }
 }
 
@@ -167,7 +166,7 @@ mod tests {
     fn test_user_string_content_is_rendered() {
         let chat_history = parse_chat_history(FIXTURE_FIRST_USER);
         assert_eq!(chat_history.messages.len(), 1);
-        assert_eq!(chat_history.messages[0].role, "user");
+        assert_eq!(chat_history.messages[0].role, Role::User);
         let Content::Text(ref text) = chat_history.messages[0].content else {
             panic!()
         };
@@ -254,8 +253,8 @@ mod tests {
         .join("\n");
         let chat_history = parse_chat_history(&jsonl);
         assert_eq!(chat_history.messages.len(), 2);
-        assert_eq!(chat_history.messages[0].role, "user");
-        assert_eq!(chat_history.messages[1].role, "assistant");
+        assert_eq!(chat_history.messages[0].role, Role::User);
+        assert_eq!(chat_history.messages[1].role, Role::Assistant);
     }
 
     #[test]
@@ -263,7 +262,7 @@ mod tests {
         let jsonl = [FIXTURE_FIRST_USER, &make_interrupted_request_line()].join("\n");
         let chat_history = parse_chat_history(&jsonl);
         assert_eq!(chat_history.messages.len(), 1);
-        assert_eq!(chat_history.messages[0].role, "user");
+        assert_eq!(chat_history.messages[0].role, Role::User);
     }
 
     #[test]
@@ -271,7 +270,7 @@ mod tests {
         let jsonl = [FIXTURE_FIRST_USER, &make_interrupted_tool_use_line()].join("\n");
         let chat_history = parse_chat_history(&jsonl);
         assert_eq!(chat_history.messages.len(), 1);
-        assert_eq!(chat_history.messages[0].role, "user");
+        assert_eq!(chat_history.messages[0].role, Role::User);
     }
 
     #[test]
@@ -297,6 +296,19 @@ mod tests {
     #[test]
     fn test_local_command_stdout_entries_are_excluded() {
         let jsonl = [FIXTURE_LOCAL_COMMAND_STDOUT_USER, FIXTURE_FIRST_USER].join("\n");
+        let chat_history = parse_chat_history(&jsonl);
+        assert_eq!(chat_history.messages.len(), 1);
+        let Content::Text(ref text) = chat_history.messages[0].content else {
+            panic!()
+        };
+        assert_eq!(text, "first message");
+    }
+
+    #[test]
+    fn test_entries_without_message_field_are_skipped() {
+        let custom_title = r#"{"type":"custom-title","customTitle":"my title"}"#;
+        let no_message = r#"{"type":"file-history-snapshot","files":[]}"#;
+        let jsonl = [custom_title, FIXTURE_FIRST_USER, no_message].join("\n");
         let chat_history = parse_chat_history(&jsonl);
         assert_eq!(chat_history.messages.len(), 1);
         let Content::Text(ref text) = chat_history.messages[0].content else {

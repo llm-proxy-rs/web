@@ -62,6 +62,8 @@ interface SseContextValue {
   getQuestionsForConversation: (
     conversationId: string,
   ) => StoredQuestion | null;
+  /** Reset vmId to trigger re-provisioning via vm-status polling. */
+  resetVmId: () => void;
 }
 
 const SseContext = createContext<SseContextValue | null>(null);
@@ -85,9 +87,10 @@ function readAppConfig(): {
 
 export function SseProvider({ children }: { children: React.ReactNode }) {
   const config = useRef(readAppConfig());
-  const { uploadDir, uploadAction, hasUserRootfs } = config.current;
+  const { uploadDir, uploadAction } = config.current;
 
   const [vmId, setVmId] = useState(config.current.vmId);
+  const [hasUserRootfs, setHasUserRootfs] = useState(config.current.hasUserRootfs);
   const vmReady = vmId !== "";
 
   const csrfTokenRef = useRef(config.current.csrfToken);
@@ -105,8 +108,11 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (vmId !== "") return;
     let cancelled = false;
+    const MAX_ATTEMPTS = 90; // ~3 minutes at 2s intervals
     const poll = async () => {
-      while (!cancelled) {
+      let attempts = 0;
+      while (!cancelled && attempts < MAX_ATTEMPTS) {
+        attempts++;
         try {
           const res = await fetch("/api/vm-status");
           // If redirected to login page, navigate there
@@ -131,6 +137,9 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
           const data = await res.json();
           if (data.status === "ready" && data.vm_id) {
             setVmId(data.vm_id);
+            if (data.has_user_rootfs) {
+              setHasUserRootfs(true);
+            }
             return;
           }
         } catch {
@@ -381,6 +390,13 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
     return data.entries as FileEntry[];
   }, []);
 
+  const resetVmId = useCallback(() => {
+    if (vmId) {
+      localStorage.removeItem(`chat_running_task_${vmId}`);
+    }
+    setVmId("");
+  }, [vmId]);
+
   return (
     <SseContext.Provider
       value={{
@@ -408,6 +424,7 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
         storeQuestion,
         clearQuestion,
         getQuestionsForConversation,
+        resetVmId,
       }}
     >
       {children}

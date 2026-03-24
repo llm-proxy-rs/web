@@ -49,7 +49,7 @@ test.describe("vm provisioning", () => {
     });
 
     // Route WS so terminal doesn't error
-    await page.routeWebSocket(/\/ws\//, () => {});
+    await page.routeWebSocket(/\/ws\b/, () => {});
 
     await setupApp(page, { vmId: "" });
 
@@ -89,7 +89,7 @@ test.describe("vm provisioning", () => {
   test("VP-04 terminal WS not opened until vmId is set", async ({ page }) => {
     let wsConnected = false;
 
-    await page.routeWebSocket(/\/ws\//, () => {
+    await page.routeWebSocket(/\/ws\b/, () => {
       wsConnected = true;
     });
 
@@ -130,5 +130,43 @@ test.describe("vm provisioning", () => {
 
     // WS should now be connected
     expect(wsConnected).toBe(true);
+  });
+
+  test("VP-05 reset button appears after provisioning with has_user_rootfs", async ({
+    page,
+  }) => {
+    let pollCount = 0;
+
+    await page.route("**/api/vm-status", (route) => {
+      pollCount++;
+      if (pollCount >= 2) {
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            status: "ready",
+            vm_id: VM_ID,
+            has_user_rootfs: true,
+          }),
+        });
+      }
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ status: "provisioning" }),
+      });
+    });
+
+    await page.routeWebSocket(/\/ws\b/, () => {});
+
+    await setupApp(page, { vmId: "", hasUserRootfs: false });
+
+    // Initially no reset button (hasUserRootfs is false)
+    await expect(page.getByTitle("Reset environment")).not.toBeVisible();
+
+    // After polling returns ready with has_user_rootfs: true, button should appear
+    await expect(page.getByTitle("Reset environment")).toBeVisible({
+      timeout: 10000,
+    });
   });
 });

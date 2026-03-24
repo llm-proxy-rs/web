@@ -64,6 +64,8 @@ pub(crate) struct AppConfig {
     #[serde(default)]
     pub(crate) gateway_api_url: String,
     #[serde(default)]
+    pub(crate) gateway_tls_accept_invalid_certs: bool,
+    #[serde(default)]
     pub(crate) gateway_identity_provider: String,
     #[serde(default = "default_user_rootfs_dir")]
     pub(crate) user_rootfs_dir: PathBuf,
@@ -95,8 +97,6 @@ pub(crate) struct AppConfig {
     pub(crate) iam_role_name: String,
     #[serde(default)]
     pub(crate) anthropic_base_url: Option<String>,
-    #[serde(default)]
-    pub(crate) enable_mcp: bool,
     #[serde(default = "default_anthropic_default_haiku_model")]
     pub(crate) anthropic_default_haiku_model: String,
     #[serde(default = "default_anthropic_default_sonnet_model")]
@@ -258,12 +258,20 @@ pub(crate) fn update_vm_last_activity(vms: &VmRegistry, vm_id: &str) -> Result<(
     Ok(())
 }
 
-pub(crate) fn find_user_vm(vms: &VmRegistry, user_id: Uuid) -> Result<Option<(String, Ipv4Addr)>> {
+pub(crate) struct UserVmInfo {
+    pub(crate) vm_id: String,
+    pub(crate) guest_ip: Ipv4Addr,
+}
+
+pub(crate) fn find_user_vm(vms: &VmRegistry, user_id: Uuid) -> Result<Option<UserVmInfo>> {
     let registry = vms
         .lock()
         .map_err(|_| anyhow!("vm registry lock poisoned"))?;
     Ok(registry
         .iter()
         .find(|(_, e)| e.user_id == user_id)
-        .map(|(id, e)| (id.clone(), e.vm.guest_ip())))
+        .map(|(id, e)| UserVmInfo {
+            vm_id: id.clone(),
+            guest_ip: e.vm.guest_ip(),
+        }))
 }

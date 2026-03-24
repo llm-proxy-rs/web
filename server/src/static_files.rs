@@ -17,12 +17,16 @@ pub(crate) struct StaticAssets {
     pub(crate) fonts_dir: PathBuf,
 }
 
-pub(crate) fn load_static_assets(static_dir: &path::Path) -> StaticAssets {
-    StaticAssets {
+pub(crate) fn load_static_assets(static_dir: &path::Path) -> anyhow::Result<StaticAssets> {
+    let fonts_dir = static_dir.join("fonts");
+    let fonts_dir = fonts_dir
+        .canonicalize()
+        .context("fonts directory does not exist")?;
+    Ok(StaticAssets {
         app_js_path: static_dir.join("app.js"),
         styles_css_path: static_dir.join("styles.css"),
-        fonts_dir: static_dir.join("fonts"),
-    }
+        fonts_dir,
+    })
 }
 
 pub(crate) async fn serve_app_js(State(state): State<AppState>) -> Result<Response, AppError> {

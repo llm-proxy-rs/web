@@ -40,7 +40,7 @@ use crate::{
     },
     csrf::csrf_middleware,
     download::download_file_handler,
-    files::list_files_handler,
+    files::{delete_handler, list_files_handler},
     gateway_auth::renew_gateway_key_handler,
     gateway_callback::gateway_callback_handler,
     handlers::{
@@ -64,16 +64,10 @@ async fn main() -> Result<()> {
         )
         .init();
     let app_config = load_config()?;
-    let static_assets = load_static_assets(&app_config.static_dir);
+    let static_assets = load_static_assets(&app_config.static_dir)?;
     let pg_pool = store::connect_db(&app_config.database_url).await?;
     store::run_migrations(&pg_pool).await?;
-    let session_store = PostgresStore::new(pg_pool.clone());
-    session_store.migrate().await?;
-    let deletion_task = tokio::task::spawn(
-        session_store
-            .clone()
-            .continuously_delete_expired(tokio::time::Duration::from_secs(3600)),
-    );
+    let (session_store, deletion_task) = create_session_store(pg_pool.clone()).await?;
     let app_state = AppState::new(app_config, pg_pool, static_assets);
     let port = app_state.config.port;
     cleanup_stale_vms(
@@ -82,12 +76,8 @@ async fn main() -> Result<()> {
     )
     .await;
     setup_host_networking(&app_state.config.net_helper_path).await?;
-    let mmds_refresh_abort_handle = if app_state.config.use_iam_creds {
-        Some(spawn_mmds_refresh_task(app_state.clone()).abort_handle())
-    } else {
-        None
-    };
-    let idle_vm_sweep_task = spawn_idle_vm_sweep_task(app_state.clone());
+    let (mmds_refresh_abort_handle, idle_vm_sweep_abort_handle) =
+        spawn_background_tasks(&app_state);
     let router = build_router(app_state.clone(), session_store);
     serve_router(
         router,
@@ -95,10 +85,36 @@ async fn main() -> Result<()> {
         app_state,
         deletion_task.abort_handle(),
         mmds_refresh_abort_handle,
-        idle_vm_sweep_task.abort_handle(),
+        idle_vm_sweep_abort_handle,
     )
     .await?;
     Ok(())
+}
+
+async fn create_session_store(
+    pg_pool: store::PgPool,
+) -> Result<(
+    PostgresStore,
+    tokio::task::JoinHandle<Result<(), tower_sessions::session_store::Error>>,
+)> {
+    let session_store = PostgresStore::new(pg_pool);
+    session_store.migrate().await?;
+    let deletion_task = tokio::task::spawn(
+        session_store
+            .clone()
+            .continuously_delete_expired(tokio::time::Duration::from_secs(3600)),
+    );
+    Ok((session_store, deletion_task))
+}
+
+fn spawn_background_tasks(app_state: &AppState) -> (Option<AbortHandle>, AbortHandle) {
+    let mmds_refresh_abort_handle = if app_state.config.use_iam_creds {
+        Some(spawn_mmds_refresh_task(app_state.clone()).abort_handle())
+    } else {
+        None
+    };
+    let idle_vm_sweep_abort_handle = spawn_idle_vm_sweep_task(app_state.clone()).abort_handle();
+    (mmds_refresh_abort_handle, idle_vm_sweep_abort_handle)
 }
 
 fn build_router(app_state: AppState, session_store: PostgresStore) -> Router {
@@ -119,6 +135,7 @@ fn build_router(app_state: AppState, session_store: PostgresStore) -> Router {
             post(handle_chat_upload).layer(DefaultBodyLimit::max(50 * 1024 * 1024)),
         )
         .route("/ls", get(list_files_handler))
+        .route("/delete", post(delete_handler))
         .route("/download", get(download_file_handler))
         .route(
             "/upload",
@@ -132,7 +149,7 @@ fn build_router(app_state: AppState, session_store: PostgresStore) -> Router {
         .route("/api/csrf-token", get(get_csrf_token_handler))
         .route("/rootfs/delete", post(delete_user_rootfs_handler))
         .route("/terminal/{id}", get(get_terminal_page))
-        .route("/ws/{id}", get(handle_ws_upgrade))
+        .route("/ws", get(handle_ws_upgrade))
         .route("/login", get(get_login_handler))
         .route("/login/cognito", get(get_cognito_login_handler))
         .route("/logout", post(get_logout_handler))
@@ -230,7 +247,12 @@ fn spawn_idle_vm_sweep_task(app_state: AppState) -> tokio::task::JoinHandle<()> 
         interval.tick().await;
         loop {
             interval.tick().await;
-            sweep_idle_vms(&app_state.vms).await;
+            sweep_idle_vms(
+                &app_state.vms,
+                &app_state.config.user_rootfs_dir,
+                &app_state.rootfs_lock,
+            )
+            .await;
         }
     })
 }

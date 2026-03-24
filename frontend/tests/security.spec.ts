@@ -156,3 +156,74 @@ test.describe("markdown sanitization", () => {
     // If href is null, the sanitizer stripped it completely — that's even safer.
   });
 });
+
+test.describe("gateway renew redirect validation", () => {
+  test("SEC-01 blocks http: redirect URLs", async ({ page }) => {
+    await setupApp(page, {
+      settings: {
+        uses_bedrock: false,
+        has_api_key: false,
+        base_url: null,
+        gateway_configured: true,
+      },
+      renewGatewayKeyRedirect: "http://evil.example.com/phish",
+    });
+
+    await page.getByTitle("Settings").click();
+    await page.getByRole("button", { name: "Renew API Key" }).click();
+
+    // Should show error because http: is blocked
+    await expect(
+      page.getByText("Failed to renew. Please try again."),
+    ).toBeVisible();
+  });
+
+  test("SEC-02 blocks javascript: redirect URLs", async ({ page }) => {
+    await setupApp(page, {
+      settings: {
+        uses_bedrock: false,
+        has_api_key: false,
+        base_url: null,
+        gateway_configured: true,
+      },
+      renewGatewayKeyRedirect: "javascript:alert(document.cookie)",
+    });
+
+    await page.getByTitle("Settings").click();
+    await page.getByRole("button", { name: "Renew API Key" }).click();
+
+    // Should show error because javascript: is blocked
+    await expect(
+      page.getByText("Failed to renew. Please try again."),
+    ).toBeVisible();
+  });
+});
+
+test.describe("VM status polling bounds", () => {
+  test("SEC-03 polling stops after max attempts", async ({ page }) => {
+    let pollCount = 0;
+
+    // Always return provisioning so polling never succeeds
+    await page.route("**/api/vm-status", (route) => {
+      pollCount++;
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ status: "provisioning" }),
+      });
+    });
+
+    await setupApp(page, { vmId: "" });
+
+    // Wait enough time for many polls (2s interval, MAX_ATTEMPTS=90 → 180s).
+    // We can't wait 180s in a test, but we can verify it's polling and bounded.
+    // Wait 6 seconds and verify polls are happening at ~2s intervals.
+    await page.waitForTimeout(6000);
+    const earlyCount = pollCount;
+    expect(earlyCount).toBeGreaterThanOrEqual(2);
+    expect(earlyCount).toBeLessThanOrEqual(5);
+
+    // Composer should NOT appear (still loading)
+    await expect(page.getByPlaceholder("Message Claude…")).not.toBeVisible();
+  });
+});

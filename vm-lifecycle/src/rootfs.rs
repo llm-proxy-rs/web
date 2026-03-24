@@ -63,11 +63,11 @@ pub async fn save_all_vm_rootfs(
         "saving rootfs for {} running vm(s) before shutdown",
         vm_entries.len()
     );
-    save_vm_rootfs_to_dir(&vm_entries, user_rootfs_dir, rootfs_lock).await
+    save_vm_rootfs_to_dir(vm_entries.values(), user_rootfs_dir, rootfs_lock).await
 }
 
 async fn save_vm_rootfs_to_dir(
-    vm_entries: &HashMap<String, VmEntry>,
+    vm_entries: impl Iterator<Item = &VmEntry>,
     user_rootfs_dir: &Path,
     rootfs_lock: &AsyncMutex<()>,
 ) -> Result<()> {
@@ -77,7 +77,7 @@ async fn save_vm_rootfs_to_dir(
     let _guard = timeout(Duration::from_secs(LOCK_TIMEOUT_SECS), rootfs_lock.lock())
         .await
         .context("timed out waiting for rootfs lock")?;
-    for vm_entry in vm_entries.values() {
+    for vm_entry in vm_entries {
         let rootfs_path = build_user_rootfs_path(user_rootfs_dir, vm_entry.user_id);
         info!(dest = %rootfs_path.display(), "saving rootfs on shutdown");
         vm_entry
@@ -87,4 +87,36 @@ async fn save_vm_rootfs_to_dir(
             .context("failed to save rootfs on shutdown")?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_user_rootfs_path_format() {
+        let user_id = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        let path = build_user_rootfs_path(Path::new("/data/rootfs"), user_id);
+        assert_eq!(
+            path,
+            PathBuf::from("/data/rootfs/550e8400-e29b-41d4-a716-446655440000.ext4")
+        );
+    }
+
+    #[test]
+    fn build_user_rootfs_path_different_dir() {
+        let user_id = Uuid::nil();
+        let path = build_user_rootfs_path(Path::new("/tmp"), user_id);
+        assert_eq!(
+            path,
+            PathBuf::from("/tmp/00000000-0000-0000-0000-000000000000.ext4")
+        );
+    }
+
+    #[test]
+    fn find_user_rootfs_returns_none_for_missing_file() {
+        let user_id = Uuid::parse_str("ffffffff-ffff-ffff-ffff-ffffffffffff").unwrap();
+        // /nonexistent won't contain this file
+        assert!(find_user_rootfs(Path::new("/nonexistent"), user_id).is_none());
+    }
 }

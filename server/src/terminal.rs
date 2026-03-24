@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use axum::{
     Error as AxumError,
     extract::{
-        Path, State,
+        State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::{HeaderMap, StatusCode},
@@ -29,14 +29,10 @@ const SEND_TIMEOUT_SECS: u64 = 30;
 
 pub(crate) async fn handle_ws_upgrade(
     user_vm: UserVm,
-    Path(vm_id): Path<String>,
     headers: HeaderMap,
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
-    if user_vm.vm_id != vm_id {
-        return Ok((StatusCode::NOT_FOUND, "Session not found").into_response());
-    }
     // Validate Origin header to prevent cross-site WebSocket hijacking.
     // Browsers always send Origin on WebSocket upgrades; reject if it
     // doesn't match the Host header.
@@ -78,7 +74,7 @@ async fn run_terminal_session(
         error!("vm registry lock poisoned, aborting terminal session");
         return;
     }
-    if run_ssh_relay(guest_ip, &state, ws).await.is_err() {
+    if run_ssh_relay(guest_ip, &state, &vm_id, ws).await.is_err() {
         error!("terminal session error");
     }
     if save_and_drop_vm(&state, &vm_id, user_id).await.is_err() {
@@ -123,7 +119,12 @@ async fn save_vm_rootfs_on_disconnect(
         .context("failed to save rootfs")
 }
 
-async fn run_ssh_relay(guest_ip: Ipv4Addr, state: &AppState, ws: WebSocket) -> Result<()> {
+async fn run_ssh_relay(
+    guest_ip: Ipv4Addr,
+    state: &AppState,
+    vm_id: &str,
+    ws: WebSocket,
+) -> Result<()> {
     let mut ssh_handle = connect_ssh(
         guest_ip,
         &state.config.ssh_key_path,
@@ -140,8 +141,13 @@ async fn run_ssh_relay(guest_ip: Ipv4Addr, state: &AppState, ws: WebSocket) -> R
     tokio::spawn(async move {
         let mut ws_receiver = ws_receiver;
         while let Some(msg) = ws_receiver.next().await {
-            if ws_tx.send(msg).await.is_err() {
-                break;
+            match timeout(Duration::from_secs(SEND_TIMEOUT_SECS), ws_tx.send(msg)).await {
+                Ok(Ok(())) => {}
+                Ok(Err(_)) => break,
+                Err(_) => {
+                    warn!("ws mpsc send timed out, consumer likely stuck");
+                    break;
+                }
             }
         }
     });
@@ -151,12 +157,15 @@ async fn run_ssh_relay(guest_ip: Ipv4Addr, state: &AppState, ws: WebSocket) -> R
         tokio::select! {
             msg = ssh_channel.wait() => {
                 relay_ssh_to_ws(msg, &mut ws_sender).await?;
+                let _ = update_vm_last_activity(&state.vms, vm_id);
             }
             ws_msg = ws_rx.recv() => {
                 relay_ws_to_ssh(ws_msg, &mut ssh_channel, &mut ws_sender).await?;
+                let _ = update_vm_last_activity(&state.vms, vm_id);
             }
             _ = keepalive.tick() => {
                 send_ws_keepalive(&mut ws_sender).await?;
+                let _ = update_vm_last_activity(&state.vms, vm_id);
             }
         }
     }
@@ -230,23 +239,26 @@ async fn send_ws_keepalive(ws_sender: &mut SplitSink<WebSocket, Message>) -> Res
     Ok(())
 }
 
+const MAX_TERMINAL_COLS: u32 = 500;
+const MAX_TERMINAL_ROWS: u32 = 500;
+
+/// Parse a resize JSON message and return validated (cols, rows), or None if
+/// the message is not a resize or has invalid values.
+fn parse_resize_message(text: &str) -> Option<(u32, u32)> {
+    let json = serde_json::from_str::<serde_json::Value>(text).ok()?;
+    if json["type"] != "resize" {
+        return None;
+    }
+    let cols = u32::try_from(json["cols"].as_u64()?).ok()?;
+    let rows = u32::try_from(json["rows"].as_u64()?).ok()?;
+    if !(1..=MAX_TERMINAL_COLS).contains(&cols) || !(1..=MAX_TERMINAL_ROWS).contains(&rows) {
+        return None;
+    }
+    Some((cols, rows))
+}
+
 async fn handle_resize_message(ssh_channel: &mut Channel<Msg>, text: &str) -> Result<()> {
-    let Ok(json) = serde_json::from_str::<serde_json::Value>(text) else {
-        return Ok(());
-    };
-    if json["type"] == "resize" {
-        let cols = u32::try_from(
-            json["cols"]
-                .as_u64()
-                .context("missing cols in resize message")?,
-        )
-        .context("cols out of u32 range")?;
-        let rows = u32::try_from(
-            json["rows"]
-                .as_u64()
-                .context("missing rows in resize message")?,
-        )
-        .context("rows out of u32 range")?;
+    if let Some((cols, rows)) = parse_resize_message(text) {
         timeout(
             Duration::from_secs(SEND_TIMEOUT_SECS),
             ssh_channel.window_change(cols, rows, 0, 0),
@@ -256,4 +268,68 @@ async fn handle_resize_message(ssh_channel: &mut Channel<Msg>, text: &str) -> Re
         .context("window_change failed")?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resize_valid_cols_rows() {
+        let msg = r#"{"type":"resize","cols":80,"rows":24}"#;
+        assert_eq!(parse_resize_message(msg), Some((80, 24)));
+    }
+
+    #[test]
+    fn resize_cols_zero_rejected() {
+        let msg = r#"{"type":"resize","cols":0,"rows":24}"#;
+        assert_eq!(parse_resize_message(msg), None);
+    }
+
+    #[test]
+    fn resize_rows_zero_rejected() {
+        let msg = r#"{"type":"resize","cols":80,"rows":0}"#;
+        assert_eq!(parse_resize_message(msg), None);
+    }
+
+    #[test]
+    fn resize_cols_over_max_rejected() {
+        let msg = r#"{"type":"resize","cols":501,"rows":24}"#;
+        assert_eq!(parse_resize_message(msg), None);
+    }
+
+    #[test]
+    fn resize_rows_over_max_rejected() {
+        let msg = r#"{"type":"resize","cols":80,"rows":501}"#;
+        assert_eq!(parse_resize_message(msg), None);
+    }
+
+    #[test]
+    fn resize_at_max_accepted() {
+        let msg = r#"{"type":"resize","cols":500,"rows":500}"#;
+        assert_eq!(parse_resize_message(msg), Some((500, 500)));
+    }
+
+    #[test]
+    fn non_resize_message_ignored() {
+        let msg = r#"{"type":"input","data":"hello"}"#;
+        assert_eq!(parse_resize_message(msg), None);
+    }
+
+    #[test]
+    fn invalid_json_ignored() {
+        assert_eq!(parse_resize_message("not json at all"), None);
+    }
+
+    #[test]
+    fn resize_missing_cols_ignored() {
+        let msg = r#"{"type":"resize","rows":24}"#;
+        assert_eq!(parse_resize_message(msg), None);
+    }
+
+    #[test]
+    fn resize_huge_values_rejected() {
+        let msg = r#"{"type":"resize","cols":4294967295,"rows":4294967295}"#;
+        assert_eq!(parse_resize_message(msg), None);
+    }
 }

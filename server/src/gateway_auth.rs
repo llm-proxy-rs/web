@@ -1,7 +1,3 @@
-use crate::{
-    handlers::UserVm,
-    state::{AppConfig, AppError, AppState},
-};
 use anyhow::{Context, Result};
 use authorize::AuthorizeUrlBuilder;
 use axum::{
@@ -12,6 +8,11 @@ use axum::{
 use serde::Deserialize;
 use token::TokenRequestBuilder;
 use tower_sessions::Session;
+
+use crate::{
+    handlers::UserVm,
+    state::{AppConfig, AppError, AppState},
+};
 
 #[derive(Deserialize)]
 struct ApiKeyResponse {
@@ -93,10 +94,13 @@ pub(crate) async fn exchange_gateway_code(
 pub(crate) async fn provision_gateway_api_key(
     access_token: &str,
     gateway_api_url: &str,
+    gateway_tls_accept_invalid_certs: bool,
 ) -> Result<String> {
     let url = format!("{}/api/v1/api-key", gateway_api_url);
 
     let client = reqwest::Client::builder()
+        .tls_danger_accept_invalid_certs(gateway_tls_accept_invalid_certs)
+        .tls_backend_rustls()
         .build()
         .context("failed to build HTTP client")?;
     let resp = client

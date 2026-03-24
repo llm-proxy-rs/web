@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { ChevronRight, Download, Folder, File, Upload, X } from "lucide-react";
+import { ChevronRight, Download, Folder, File, Trash2, Upload, X } from "lucide-react";
 import { useSse } from "../contexts/SseContext";
 import type { FileEntry } from "../types";
 
@@ -55,6 +55,7 @@ export default function FileManager({ onClose }: { onClose?: () => void }) {
     async (file: File) => {
       flushSync(() => setUploadStatus("Uploading…"));
       const formData = new FormData();
+      formData.append("dir", currentPath);
       formData.append("file", file);
       try {
         const res = await csrfFetch(uploadAction, {
@@ -76,6 +77,28 @@ export default function FileManager({ onClose }: { onClose?: () => void }) {
       );
     },
     [csrfFetch, currentPath, uploadAction, loadDir],
+  );
+
+  const handleDelete = useCallback(
+    async (name: string, path: string) => {
+      if (!window.confirm(`Delete "${name}"?`)) return;
+      try {
+        const res = await csrfFetch("/delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path }),
+        });
+        if (res.ok) {
+          setEntries((prev) => prev.filter((e) => e.name !== name));
+        } else {
+          const text = await res.text();
+          setError(`Delete failed: ${text}`);
+        }
+      } catch {
+        setError("Delete failed: network error.");
+      }
+    },
+    [csrfFetch],
   );
 
   useEffect(() => {
@@ -191,16 +214,28 @@ export default function FileManager({ onClose }: { onClose?: () => void }) {
                   nameClass="text-blue-400"
                   onClick={() => loadDir(entryPath)}
                   action={
-                    <a
-                      href={`/download?path=${encodeURIComponent(entryPath)}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title="Download as zip"
-                      onClick={(e) => e.stopPropagation()}
-                      className="ml-1 text-sm text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground"
-                    >
-                      <Download className="h-3.5 w-3.5" />
-                    </a>
+                    <>
+                      <button
+                        title="Delete"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDelete(entry.name, entryPath);
+                        }}
+                        className="ml-1 text-sm text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-destructive"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                      <a
+                        href={`/download?path=${encodeURIComponent(entryPath)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Download as zip"
+                        onClick={(e) => e.stopPropagation()}
+                        className="ml-1 text-sm text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                      </a>
+                    </>
                   }
                 />
               ) : (
@@ -217,9 +252,21 @@ export default function FileManager({ onClose }: { onClose?: () => void }) {
                     )
                   }
                   action={
-                    <span className="ml-1 text-xs text-muted-foreground opacity-50">
-                      {formatSize(entry.size)}
-                    </span>
+                    <>
+                      <button
+                        title="Delete"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDelete(entry.name, entryPath);
+                        }}
+                        className="ml-1 text-sm text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-destructive"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                      <span className="ml-1 text-xs text-muted-foreground opacity-50">
+                        {formatSize(entry.size)}
+                      </span>
+                    </>
                   }
                 />
               );

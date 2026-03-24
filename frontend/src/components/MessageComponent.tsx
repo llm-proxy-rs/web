@@ -6,6 +6,7 @@ import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { twMerge } from "tailwind-merge";
+import { visit } from "unist-util-visit";
 import type { ChatMessage } from "../types";
 import MessageCopyControl from "./MessageCopyControl";
 import ToolRenderer from "./ToolRenderer";
@@ -352,11 +353,59 @@ const markdownComponents = {
   ),
 };
 
+// Regex to match absolute file paths with a file extension.
+// Matches paths like /home/ubuntu/file.jpg, /tmp/output.png, etc.
+// Requires at least one slash after root and a file extension to avoid false positives.
+const FILE_PATH_RE =
+  /(?<=^|[\s(,])(\/([\w._-]+\/)+[\w._-]+\.[\w]+)(?=[)\s,;.:!?]|$)/g;
+
+function remarkFilePathLinks() {
+  return (tree: any) => {
+    visit(tree, "text", (node: any, index: number, parent: any) => {
+      if (!parent || parent.type === "code" || parent.type === "inlineCode")
+        return;
+      // Skip text inside link nodes
+      if (parent.type === "link") return;
+
+      const value: string = node.value;
+      FILE_PATH_RE.lastIndex = 0;
+      const matches = [...value.matchAll(FILE_PATH_RE)];
+      if (matches.length === 0) return;
+
+      const children: any[] = [];
+      let lastEnd = 0;
+
+      for (const m of matches) {
+        const start = m.index!;
+        const matchedPath = m[1];
+        if (start > lastEnd) {
+          children.push({ type: "text", value: value.slice(lastEnd, start) });
+        }
+        children.push({
+          type: "link",
+          url: `/download?path=${encodeURIComponent(matchedPath)}`,
+          children: [{ type: "text", value: matchedPath }],
+        });
+        lastEnd = start + matchedPath.length;
+      }
+      if (lastEnd < value.length) {
+        children.push({ type: "text", value: value.slice(lastEnd) });
+      }
+
+      parent.children.splice(index, 1, ...children);
+      return index + children.length;
+    });
+  };
+}
+
 function MarkdownContent({ content }: { content: string }) {
   if (content === "__FORCE_RENDER_ERROR__") {
     throw new Error("Forced render error for testing");
   }
-  const remarkPlugins = useMemo(() => [remarkGfm, remarkBreaks], []);
+  const remarkPlugins = useMemo(
+    () => [remarkGfm, remarkBreaks, remarkFilePathLinks],
+    [],
+  );
   const rehypePlugins = useMemo(
     () => [
       [

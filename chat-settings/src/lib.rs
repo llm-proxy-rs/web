@@ -9,7 +9,6 @@ const GET_SETTINGS_CMD: &str = "cat ~/.claude/settings.json 2>/dev/null || echo 
 const SET_SETTINGS_CMD: &str = "mkdir -p ~/.claude && cat > ~/.claude/settings.json";
 const CHANNEL_SEND_TIMEOUT_SECS: u64 = 30;
 const CHANNEL_WAIT_TIMEOUT_SECS: u64 = 30;
-const MCP_PROXY_LOCAL_PORT: u16 = 8443;
 
 pub struct VmSettings {
     pub has_api_key: bool,
@@ -22,7 +21,6 @@ pub fn build_api_key_settings_json(
     haiku_model: &str,
     sonnet_model: &str,
     opus_model: &str,
-    enable_mcp: bool,
 ) -> Result<String> {
     let mut env = serde_json::json!({
         "ANTHROPIC_AUTH_TOKEN": api_key,
@@ -34,7 +32,7 @@ pub fn build_api_key_settings_json(
     if let Some(url) = base_url {
         env["ANTHROPIC_BASE_URL"] = serde_json::Value::String(url.to_string());
     }
-    let mut settings = serde_json::json!({
+    let settings = serde_json::json!({
         "$schema": "https://json.schemastore.org/claude-code-settings.json",
         "env": env,
         "permissions": {
@@ -42,14 +40,6 @@ pub fn build_api_key_settings_json(
         },
         "skipWebFetchPreflight": true,
     });
-    if enable_mcp {
-        settings["mcpServers"] = serde_json::json!({
-            "gemini-websearch": {
-                "type": "http",
-                "url": format!("http://localhost:{MCP_PROXY_LOCAL_PORT}/mcp")
-            }
-        });
-    }
     serde_json::to_string_pretty(&settings).context("settings serialization failed")
 }
 
@@ -57,9 +47,8 @@ pub fn build_bedrock_settings_json(
     haiku_model: &str,
     sonnet_model: &str,
     opus_model: &str,
-    enable_mcp: bool,
 ) -> Result<String> {
-    let mut settings = serde_json::json!({
+    let settings = serde_json::json!({
         "$schema": "https://json.schemastore.org/claude-code-settings.json",
         "env": {
             "ANTHROPIC_DEFAULT_HAIKU_MODEL": haiku_model,
@@ -68,14 +57,6 @@ pub fn build_bedrock_settings_json(
             "CLAUDE_CODE_USE_BEDROCK": "1",
         },
     });
-    if enable_mcp {
-        settings["mcpServers"] = serde_json::json!({
-            "gemini-websearch": {
-                "type": "http",
-                "url": format!("http://localhost:{MCP_PROXY_LOCAL_PORT}/mcp")
-            }
-        });
-    }
     serde_json::to_string_pretty(&settings).context("settings serialization failed")
 }
 
@@ -175,4 +156,110 @@ async fn write_settings_file(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- parse_vm_settings ---
+
+    #[test]
+    fn parse_settings_with_api_key() {
+        let json = r#"{"env":{"ANTHROPIC_AUTH_TOKEN":"sk-test-123"}}"#;
+        let settings = parse_vm_settings(json).unwrap();
+        assert!(settings.has_api_key);
+        assert!(settings.model.is_none());
+    }
+
+    #[test]
+    fn parse_settings_without_api_key() {
+        let json = r#"{"env":{}}"#;
+        let settings = parse_vm_settings(json).unwrap();
+        assert!(!settings.has_api_key);
+    }
+
+    #[test]
+    fn parse_settings_empty_api_key() {
+        let json = r#"{"env":{"ANTHROPIC_AUTH_TOKEN":""}}"#;
+        let settings = parse_vm_settings(json).unwrap();
+        assert!(!settings.has_api_key);
+    }
+
+    #[test]
+    fn parse_settings_with_model() {
+        let json = r#"{"model":"claude-3-opus"}"#;
+        let settings = parse_vm_settings(json).unwrap();
+        assert_eq!(settings.model.as_deref(), Some("claude-3-opus"));
+    }
+
+    #[test]
+    fn parse_settings_no_env_key() {
+        let json = r#"{}"#;
+        let settings = parse_vm_settings(json).unwrap();
+        assert!(!settings.has_api_key);
+        assert!(settings.model.is_none());
+    }
+
+    #[test]
+    fn parse_settings_invalid_json() {
+        assert!(parse_vm_settings("not json").is_err());
+    }
+
+    // --- build_api_key_settings_json ---
+
+    #[test]
+    fn api_key_settings_contains_token() {
+        let json = build_api_key_settings_json("sk-abc", None, "haiku", "sonnet", "opus").unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["env"]["ANTHROPIC_AUTH_TOKEN"], "sk-abc");
+        assert_eq!(parsed["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "haiku");
+        assert_eq!(parsed["env"]["ANTHROPIC_DEFAULT_SONNET_MODEL"], "sonnet");
+        assert_eq!(parsed["env"]["ANTHROPIC_DEFAULT_OPUS_MODEL"], "opus");
+        assert!(parsed["env"].get("ANTHROPIC_BASE_URL").is_none());
+    }
+
+    #[test]
+    fn api_key_settings_with_base_url() {
+        let json = build_api_key_settings_json(
+            "sk-abc",
+            Some("https://custom.api"),
+            "haiku",
+            "sonnet",
+            "opus",
+        )
+        .unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["env"]["ANTHROPIC_BASE_URL"], "https://custom.api");
+    }
+
+    #[test]
+    fn api_key_settings_has_schema_and_permissions() {
+        let json = build_api_key_settings_json("sk-abc", None, "h", "s", "o").unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed["$schema"].is_string());
+        assert!(parsed["permissions"]["deny"].is_array());
+        assert_eq!(parsed["skipWebFetchPreflight"], true);
+    }
+
+    // --- build_bedrock_settings_json ---
+
+    #[test]
+    fn bedrock_settings_contains_models_and_bedrock_flag() {
+        let json = build_bedrock_settings_json("haiku-br", "sonnet-br", "opus-br").unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["env"]["CLAUDE_CODE_USE_BEDROCK"], "1");
+        assert_eq!(parsed["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "haiku-br");
+        assert_eq!(parsed["env"]["ANTHROPIC_DEFAULT_SONNET_MODEL"], "sonnet-br");
+        assert_eq!(parsed["env"]["ANTHROPIC_DEFAULT_OPUS_MODEL"], "opus-br");
+        // No API token should be present
+        assert!(parsed["env"].get("ANTHROPIC_AUTH_TOKEN").is_none());
+    }
+
+    #[test]
+    fn bedrock_settings_has_schema() {
+        let json = build_bedrock_settings_json("h", "s", "o").unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed["$schema"].is_string());
+    }
 }
