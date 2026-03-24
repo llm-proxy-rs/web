@@ -26,9 +26,7 @@ test.describe("file path link detection", () => {
       ),
     );
 
-    const link = page.locator(
-      'a[href*="/download?path="]',
-    );
+    const link = page.locator('a[href*="/download?path="]');
     await expect(link).toBeVisible();
     await expect(link).toContainText("/home/ubuntu/1774240731585_image-54.jpg");
   });
@@ -59,10 +57,7 @@ test.describe("file path link detection", () => {
 
     await sendMessage(page, "where is the file?");
     ctrl.sendSseEvents(
-      sse.text(
-        "It is at /home/ubuntu/output/report.pdf",
-        "sess-fpl3",
-      ),
+      sse.text("It is at /home/ubuntu/output/report.pdf", "sess-fpl3"),
     );
 
     const link = page.locator('a[href*="/download?path="]');
@@ -77,9 +72,7 @@ test.describe("file path link detection", () => {
     const ctrl = await setupApp(page, {});
 
     await sendMessage(page, "show path");
-    ctrl.sendSseEvents(
-      sse.text("File: /tmp/data.csv", "sess-fpl4"),
-    );
+    ctrl.sendSseEvents(sse.text("File: /tmp/data.csv", "sess-fpl4"));
 
     const link = page.locator('a[href*="/download?path="]');
     await expect(link).toBeVisible();
@@ -100,7 +93,9 @@ test.describe("file path link detection", () => {
     );
 
     // The inline code should be visible
-    const inlineCode = page.locator("code").filter({ hasText: "/home/ubuntu/file.txt" });
+    const inlineCode = page
+      .locator("code")
+      .filter({ hasText: "/home/ubuntu/file.txt" });
     await expect(inlineCode).toBeVisible();
 
     // There should be no download link for the path inside code
@@ -115,10 +110,7 @@ test.describe("file path link detection", () => {
 
     await sendMessage(page, "show code");
     ctrl.sendSseEvents(
-      sse.text(
-        "```bash\ncat /home/ubuntu/file.txt\n```",
-        "sess-fpl6",
-      ),
+      sse.text("```bash\ncat /home/ubuntu/file.txt\n```", "sess-fpl6"),
     );
 
     const codeBlock = page.locator("pre").first();
@@ -129,18 +121,11 @@ test.describe("file path link detection", () => {
     await expect(downloadLinks).toHaveCount(0);
   });
 
-  test("FPL-07 common directory paths are detected", async ({
-    page,
-  }) => {
+  test("FPL-07 common directory paths are detected", async ({ page }) => {
     const ctrl = await setupApp(page, {});
 
     await sendMessage(page, "where?");
-    ctrl.sendSseEvents(
-      sse.text(
-        "The file is at /tmp/output.png",
-        "sess-fpl7",
-      ),
-    );
+    ctrl.sendSseEvents(sse.text("The file is at /tmp/output.png", "sess-fpl7"));
 
     const link = page.locator('a[href*="/download?path="]');
     await expect(link).toBeVisible();
@@ -154,10 +139,7 @@ test.describe("file path link detection", () => {
 
     await sendMessage(page, "where?");
     ctrl.sendSseEvents(
-      sse.text(
-        "I saved the file to /home/ubuntu/result.jpg.",
-        "sess-fpl8",
-      ),
+      sse.text("I saved the file to /home/ubuntu/result.jpg.", "sess-fpl8"),
     );
 
     const link = page.locator('a[href*="/download?path="]');

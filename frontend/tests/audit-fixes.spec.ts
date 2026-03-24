@@ -43,7 +43,11 @@ test.describe("audit fixes", () => {
     const ctrl = await setupApp(page, { sessions: [] });
 
     // The app should not crash — the composer should still be present
-    await expect(page.getByPlaceholder("Message Claude…")).toBeVisible();
+    await expect(
+      page.locator(
+        'textarea[placeholder="Message Claude…"], textarea[placeholder="Type to queue a message…"]',
+      ),
+    ).toBeVisible();
   });
 
   test("AF-02 multi-line SSE data: fields are concatenated per the SSE spec", async ({

@@ -90,7 +90,9 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
   const { uploadDir, uploadAction } = config.current;
 
   const [vmId, setVmId] = useState(config.current.vmId);
-  const [hasUserRootfs, setHasUserRootfs] = useState(config.current.hasUserRootfs);
+  const [hasUserRootfs, setHasUserRootfs] = useState(
+    config.current.hasUserRootfs,
+  );
   const vmReady = vmId !== "";
 
   const csrfTokenRef = useRef(config.current.csrfToken);
@@ -177,7 +179,9 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
         } else if (Array.isArray(existingHeaders)) {
           merged = Object.fromEntries(existingHeaders);
         } else {
-          merged = { ...(existingHeaders as Record<string, string> | undefined) };
+          merged = {
+            ...(existingHeaders as Record<string, string> | undefined),
+          };
         }
         if (!merged["x-csrf-token"]) {
           merged["x-csrf-token"] = csrfTokenRef.current;
