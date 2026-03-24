@@ -170,10 +170,11 @@ pub(crate) fn extract_last_user_title(contents: &str) -> Option<String> {
         // Compact summary entries have type "user" but contain the boilerplate
         // "This session is being continued..." text, not a real user message.
         .filter(|e| !e.is_compact_summary)
-        .filter(|e| !is_slash_command(&e.message.content))
-        .filter(|e| !is_local_command_output(&e.message.content))
-        .filter(|e| !is_interrupted_request(&e.message.content))
-        .find_map(|e| extract_user_title(e.message.content))
+        .filter_map(|e| e.message)
+        .filter(|m| !is_slash_command(&m.content))
+        .filter(|m| !is_local_command_output(&m.content))
+        .filter(|m| !is_interrupted_request(&m.content))
+        .find_map(|m| extract_user_title(m.content))
 }
 
 fn extract_user_title(content: Content) -> Option<String> {
@@ -365,5 +366,15 @@ mod tests {
         let last_title = r#"{"type":"custom-title","customTitle":"new-title"}"#;
         let jsonl = [FIXTURE_FIRST_USER, first_title, last_title].join("\n");
         assert_eq!(extract_session_title(&jsonl).as_deref(), Some("new-title"));
+    }
+
+    #[test]
+    fn test_entries_without_message_field_are_skipped() {
+        let no_message = r#"{"type":"file-history-snapshot","files":[]}"#;
+        let jsonl = [no_message, FIXTURE_FIRST_USER].join("\n");
+        assert_eq!(
+            extract_last_user_title(&jsonl).as_deref(),
+            Some("first message")
+        );
     }
 }

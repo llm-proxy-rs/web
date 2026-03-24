@@ -87,9 +87,10 @@ function readAppConfig(): {
 
 export function SseProvider({ children }: { children: React.ReactNode }) {
   const config = useRef(readAppConfig());
-  const { uploadDir, uploadAction, hasUserRootfs } = config.current;
+  const { uploadDir, uploadAction } = config.current;
 
   const [vmId, setVmId] = useState(config.current.vmId);
+  const [hasUserRootfs, setHasUserRootfs] = useState(config.current.hasUserRootfs);
   const vmReady = vmId !== "";
 
   const csrfTokenRef = useRef(config.current.csrfToken);
@@ -136,6 +137,9 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
           const data = await res.json();
           if (data.status === "ready" && data.vm_id) {
             setVmId(data.vm_id);
+            if (data.has_user_rootfs) {
+              setHasUserRootfs(true);
+            }
             return;
           }
         } catch {

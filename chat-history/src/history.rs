@@ -55,21 +55,28 @@ pub(crate) fn parse_chat_history(contents: &str) -> ChatHistory {
         // Code as bookkeeping markers, not real conversation messages.
         .filter(|e| !e.is_meta)
     {
+        let Some(message) = entry.message else {
+            continue;
+        };
         if entry.is_compact_summary {
-            messages.push(build_compact_summary_message(entry));
+            messages.push(ChatMessage {
+                role: message.role,
+                content: message.content,
+                is_compact_summary: true,
+            });
             continue;
         }
-        if is_slash_command(&entry.message.content) {
+        if is_slash_command(&message.content) {
             // Skip the next assistant entry too: Claude Code writes a synthetic
             // assistant reply (e.g. "No response requested.") after every slash
             // command. That reply is an internal acknowledgment, not real output.
             skip_next_assistant = true;
             continue;
         }
-        if is_local_command_output(&entry.message.content) {
+        if is_local_command_output(&message.content) {
             continue;
         }
-        if is_interrupted_request(&entry.message.content) {
+        if is_interrupted_request(&message.content) {
             continue;
         }
         if entry.type_ == "assistant" && skip_next_assistant {
@@ -77,7 +84,11 @@ pub(crate) fn parse_chat_history(contents: &str) -> ChatHistory {
             continue;
         }
         skip_next_assistant = false;
-        messages.push(build_chat_message(entry));
+        messages.push(ChatMessage {
+            role: message.role,
+            content: message.content,
+            is_compact_summary: false,
+        });
     }
     ChatHistory { messages }
 }
@@ -106,22 +117,6 @@ pub(crate) fn is_interrupted_request(content: &Content) -> bool {
                 .as_deref()
                 .is_some_and(|t| t.starts_with("[Request interrupted by user"))
         }),
-    }
-}
-
-fn build_chat_message(entry: JournalEntry) -> ChatMessage {
-    ChatMessage {
-        role: entry.message.role,
-        content: entry.message.content,
-        is_compact_summary: false,
-    }
-}
-
-fn build_compact_summary_message(entry: JournalEntry) -> ChatMessage {
-    ChatMessage {
-        role: entry.message.role,
-        content: entry.message.content,
-        is_compact_summary: true,
     }
 }
 
@@ -302,6 +297,19 @@ mod tests {
     #[test]
     fn test_local_command_stdout_entries_are_excluded() {
         let jsonl = [FIXTURE_LOCAL_COMMAND_STDOUT_USER, FIXTURE_FIRST_USER].join("\n");
+        let chat_history = parse_chat_history(&jsonl);
+        assert_eq!(chat_history.messages.len(), 1);
+        let Content::Text(ref text) = chat_history.messages[0].content else {
+            panic!()
+        };
+        assert_eq!(text, "first message");
+    }
+
+    #[test]
+    fn test_entries_without_message_field_are_skipped() {
+        let custom_title = r#"{"type":"custom-title","customTitle":"my title"}"#;
+        let no_message = r#"{"type":"file-history-snapshot","files":[]}"#;
+        let jsonl = [custom_title, FIXTURE_FIRST_USER, no_message].join("\n");
         let chat_history = parse_chat_history(&jsonl);
         assert_eq!(chat_history.messages.len(), 1);
         let Content::Text(ref text) = chat_history.messages[0].content else {
