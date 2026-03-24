@@ -4,8 +4,7 @@ use std::path::Path;
 use tracing::info;
 use uuid::Uuid;
 
-use crate::VmBuildConfig;
-use crate::iam::HostIamCredential;
+use crate::{VmBuildConfig, iam::HostIamCredential};
 
 const BOOT_ARGS: &str = "reboot=k panic=1 quiet loglevel=3 selinux=0 8250.nr_uarts=0";
 

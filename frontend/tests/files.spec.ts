@@ -4,6 +4,7 @@
  * UF-20  Navigate into dir   — clicking a directory loads its contents
  * UF-21  Breadcrumb nav      — clicking Home in breadcrumb returns to root
  * UF-22  File upload         — selecting a file shows "Uploading…" then "Uploaded."
+ * UF-23  Delete file         — clicking trash icon and confirming removes the file
  */
 import { test, expect } from "@playwright/test";
 import { setupApp } from "./helpers/setup";
@@ -110,5 +111,35 @@ test.describe("files", () => {
     await expect(page.getByText("Uploading…")).toBeVisible();
     // After the mock upload completes, banner updates to "Uploaded."
     await expect(page.getByText("Uploaded.")).toBeVisible();
+  });
+
+  test("UF-23 clicking delete on a file removes it after confirm", async ({
+    page,
+  }) => {
+    const app = await setupApp(page, {
+      files: {
+        "/tmp": [
+          { name: "old.txt", is_dir: false, size: 100 },
+          { name: "keep.txt", is_dir: false, size: 200 },
+        ],
+      },
+    });
+
+    await openFiles(page);
+    await expect(page.getByText("old.txt")).toBeVisible();
+
+    // Accept the confirm dialog
+    page.on("dialog", (dialog) => dialog.accept());
+
+    // Hover over the row to reveal the trash button, then click it
+    await page.getByText("old.txt").hover();
+    await page.getByTitle("Delete").first().click();
+
+    // After delete, the /ls endpoint is re-called — update mock to exclude the deleted file
+    app.setFiles("/tmp", [{ name: "keep.txt", is_dir: false, size: 200 }]);
+
+    // The listing should refresh and old.txt should be gone
+    await expect(page.getByText("old.txt")).not.toBeVisible();
+    await expect(page.getByText("keep.txt")).toBeVisible();
   });
 });

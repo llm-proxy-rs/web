@@ -1,9 +1,10 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import { SseProvider, useSse } from "./contexts/SseContext";
 import IconRail from "./components/IconRail";
 import Sidebar from "./components/Sidebar";
 import ChatInterface from "./components/ChatInterface";
 import Terminal from "./components/Terminal";
+import type { TerminalHandle } from "./components/Terminal";
 import FileManager from "./components/FileManager";
 import MobileNav from "./components/MobileNav";
 import SettingsPanel from "./components/SettingsPanel";
@@ -51,7 +52,10 @@ function AppContent() {
     deleteSession,
     syncConversationsFromHistory,
   } = useSse();
-  const [activeTab, setActiveTab] = useState<ViewTab>("chat");
+  const [activeTab, setActiveTab] = useState<ViewTab>(() => {
+    const saved = sessionStorage.getItem("active-tab");
+    return saved === "terminal" ? "terminal" : "chat";
+  });
   const [selectedConversation, setSelectedConversation] =
     useState<Conversation | null>(null);
   const [runningConversationIds, setRunningConversationIds] = useState<
@@ -61,11 +65,16 @@ function AppContent() {
   const [showSettings, setShowSettings] = useState(false);
   const { preferences, setPreference } = useUiPreferences();
   const [showFilesPanel, setShowFilesPanel] = useState(false);
+  const terminalRef = useRef<TerminalHandle>(null);
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     const saved = localStorage.getItem("ui-theme");
     return saved ? saved === "dark" : true;
   });
+
+  React.useEffect(() => {
+    sessionStorage.setItem("active-tab", activeTab);
+  }, [activeTab]);
 
   React.useEffect(() => {
     if (darkMode) {
@@ -77,6 +86,13 @@ function AppContent() {
   }, [darkMode]);
 
   const toggleDarkMode = useCallback(() => setDarkMode((m) => !m), []);
+
+  const closeFilesPanel = useCallback(() => {
+    setShowFilesPanel(false);
+    if (activeTab === "terminal") {
+      terminalRef.current?.focus();
+    }
+  }, [activeTab]);
 
   const handleNewChat = useCallback(() => {
     setSelectedConversation(null);
@@ -107,7 +123,12 @@ function AppContent() {
     <div className="flex h-screen w-screen overflow-hidden bg-background">
       <IconRail
         activeTab={activeTab}
-        onTabChange={setActiveTab}
+        onTabChange={(tab) => {
+          setActiveTab(tab);
+          if (tab === "terminal") {
+            setTimeout(() => terminalRef.current?.focus(), 0);
+          }
+        }}
         hasUserRootfs={hasUserRootfs}
         csrfFetch={csrfFetch}
         onSettingsOpen={() => setShowSettings(true)}
@@ -177,7 +198,7 @@ function AppContent() {
               className="min-h-0 flex-1"
             >
               <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-                <Terminal visible={activeTab === "terminal"} />
+                <Terminal ref={terminalRef} visible={activeTab === "terminal"} />
               </div>
             </div>
           </main>
@@ -195,13 +216,13 @@ function AppContent() {
       {showFilesPanel && (
         <div
           className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-sm"
-          onClick={() => setShowFilesPanel(false)}
+          onClick={closeFilesPanel}
         >
           <div
             className="flex h-full w-full max-w-sm flex-col border-l border-border bg-card shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <FileManager onClose={() => setShowFilesPanel(false)} />
+            <FileManager onClose={closeFilesPanel} />
           </div>
         </div>
       )}

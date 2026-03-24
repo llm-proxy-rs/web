@@ -11,7 +11,10 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, info, warn};
 
-use crate::{AgentMessage, channel::connect_ssh_and_open_channel};
+use crate::{
+    AgentMessage,
+    channel::{SshConnection, connect_ssh_and_open_channel},
+};
 
 const HEARTBEAT_SECS: u64 = 60;
 const SEND_TIMEOUT_SECS: u64 = 30;
@@ -72,28 +75,33 @@ async fn run_task_stream(
         Err(e) => {
             send_sse_error(&tx, e).await;
         }
-        Ok((ssh_handle, ssh_channel)) => {
-            let line = match serde_json::to_string(&message) {
-                Ok(s) => format!("{s}\n"),
-                Err(_) => {
-                    send_sse_error(&tx, anyhow::anyhow!("failed to serialize message")).await;
-                    return Ok(());
-                }
-            };
-            if let Err(e) = ssh_channel
-                .data(Bytes::from(line).as_ref())
-                .await
-                .context("failed to write message to agent socket")
-            {
-                send_sse_error(&tx, e).await;
-                return Ok(());
-            }
-            if let Err(e) = stream_ssh_channel(ssh_handle, ssh_channel, &tx).await {
-                send_sse_error(&tx, e).await;
-            }
+        Ok(conn) => {
+            stream_ssh_output(conn, &message, &tx).await;
         }
     }
     Ok(())
+}
+
+async fn stream_ssh_output(conn: SshConnection, message: &AgentMessage, tx: &mpsc::Sender<Bytes>) {
+    let line = match serde_json::to_string(message) {
+        Ok(s) => format!("{s}\n"),
+        Err(_) => {
+            send_sse_error(tx, anyhow::anyhow!("failed to serialize message")).await;
+            return;
+        }
+    };
+    if let Err(e) = conn
+        .ssh_channel
+        .data(Bytes::from(line).as_ref())
+        .await
+        .context("failed to write message to agent socket")
+    {
+        send_sse_error(tx, e).await;
+        return;
+    }
+    if let Err(e) = stream_ssh_channel(conn.ssh_handle, conn.ssh_channel, tx).await {
+        send_sse_error(tx, e).await;
+    }
 }
 
 async fn send_sse_error(tx: &mpsc::Sender<Bytes>, e: anyhow::Error) {

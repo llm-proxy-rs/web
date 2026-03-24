@@ -14,7 +14,7 @@ bytes = "1.11.1"
 chat-agent = { path = "../chat-agent" }
 chat-history = { path = "../chat-history" }
 chat-settings = { path = "../chat-settings" }
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { version = "0.4.44", features = ["serde"] }
 common = { path = "../common" }
 config = "0.15.22"
 download = { path = "../download" }
@@ -26,7 +26,7 @@ token = { git = "https://github.com/llm-proxy-rs/cognito.git" }
 hex = "0.4.3"
 html-escape = "0.2.13"
 rand = "0.9.2"
-reqwest = { version = "0.13", features = ["json"] }
+reqwest = { version = "0.13.0", features = ["json"] }
 russh = "0.58.0"
 russh-sftp = "2.1.1"
 sanitize-filename = "0.6.0"
@@ -40,6 +40,7 @@ time = { version = "0.3.47", features = ["formatting"] }
 tokio = { version = "1.50.0", features = ["full"] }
 tokio-util = { version = "0.7.18", features = ["io"] }
 tower-sessions = "0.15.0"
+sqlx = { version = "0.8.6", features = ["runtime-tokio", "tls-rustls", "postgres"] }
 tower-sessions-sqlx-store = { git = "https://github.com/llm-proxy-rs/tower-sessions-stores.git", version = "0.15.0", features = ["postgres"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }

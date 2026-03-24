@@ -1,9 +1,8 @@
 use anyhow::{Context, Result};
+use common::validate_within_dir;
 use russh_sftp::client::SftpSession;
 use std::path::{Path, PathBuf};
 use tokio::io::{AsyncRead, AsyncWriteExt, copy};
-
-use common::validate_within_dir;
 
 pub async fn write_file_via_sftp(
     sftp: &SftpSession,

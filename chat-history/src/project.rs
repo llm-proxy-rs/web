@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
-use russh_sftp::client::{SftpSession, fs::DirEntry};
+use russh_sftp::client::{SftpSession, error::Error as SftpError, fs::DirEntry};
+use russh_sftp::protocol::StatusCode;
 use std::path::{Path, PathBuf};
 
 // Returns all project directories under ~/.claude/projects on the remote VM.
@@ -10,11 +11,19 @@ pub(crate) async fn find_all_project_dirs(
     ssh_user_home: &Path,
 ) -> Result<Vec<PathBuf>> {
     let projects_base = build_projects_base_path(ssh_user_home);
-    let top_entries: Vec<DirEntry> = sftp
+    let top_entries: Vec<DirEntry> = match sftp
         .read_dir(projects_base.to_str().context("path is not valid UTF-8")?)
         .await
-        .map(|entries| entries.collect())
-        .unwrap_or_default(); // projects dir may not exist yet if Claude Code has never been run
+    {
+        Ok(entries) => entries.collect(),
+        Err(SftpError::Status(s)) if s.status_code == StatusCode::NoSuchFile => {
+            // projects dir may not exist yet if Claude Code has never been run
+            return Ok(Vec::new());
+        }
+        Err(e) => {
+            return Err(e).context("failed to read projects directory");
+        }
+    };
     let mut project_dirs = Vec::new();
     for entry in top_entries {
         let name = entry.file_name();

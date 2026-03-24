@@ -10,7 +10,7 @@ test.describe("disconnect detection", () => {
     page,
   }) => {
     let connectCount = 0;
-    await page.routeWebSocket(/\/ws\//, (ws) => {
+    await page.routeWebSocket(/\/ws\b/, (ws) => {
       connectCount++;
       if (connectCount === 1) {
         // First connection succeeds then drops
@@ -29,7 +29,7 @@ test.describe("disconnect detection", () => {
   });
 
   test("DC-02 no page reload on WS disconnect", async ({ page }) => {
-    await page.routeWebSocket(/\/ws\//, (ws) => {
+    await page.routeWebSocket(/\/ws\b/, (ws) => {
       setTimeout(() => ws.close(), 200);
     });
 

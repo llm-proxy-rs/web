@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef } from "react";
+import React, { useCallback, useEffect, useImperativeHandle, useRef } from "react";
 import { Terminal as TerminalIcon } from "lucide-react";
 import type { ITerminalOptions } from "@xterm/xterm";
 import { Terminal as XTerm } from "@xterm/xterm";
@@ -14,18 +14,21 @@ const TERMINAL_OPTIONS: ITerminalOptions = {
 
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 30000;
-// Number of silent WS reconnect attempts before falling back to a full page
-// reload.  A reload lets the server assign a fresh VM (with a new vmId) when
-// the original VM was swept for idleness.
+// Number of silent WS reconnect attempts before triggering VM re-provisioning.
 const MAX_RECONNECT_ATTEMPTS = 5;
 
-function buildWsUrl(vmId: string): string {
+function buildWsUrl(): string {
   const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${wsProto}//${window.location.host}/ws/${encodeURIComponent(vmId)}`;
+  return `${wsProto}//${window.location.host}/ws`;
 }
 
-export default function Terminal({ visible }: { visible: boolean }) {
-  const { vmId } = useSse();
+export interface TerminalHandle {
+  focus(): void;
+}
+
+const Terminal = React.forwardRef<TerminalHandle, { visible: boolean }>(
+  function Terminal({ visible }, ref) {
+  const { vmId, resetVmId } = useSse();
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -38,10 +41,18 @@ export default function Terminal({ visible }: { visible: boolean }) {
   // Track consecutive connection failures (open never fires before close)
   const consecutiveFailRef = useRef(0);
 
+  useImperativeHandle(ref, () => ({
+    focus() {
+      termRef.current?.focus();
+    },
+  }));
+
   // Reconnect state
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptRef = useRef(0);
   const unmountedRef = useRef(false);
+  // Guard against calling resetVmId multiple times
+  const resetRequestedRef = useRef(false);
 
   // Wire (or re-wire) a WS to the xterm instance + health monitoring
   const wireWs = useCallback((ws: WebSocket) => {
@@ -59,6 +70,7 @@ export default function Terminal({ visible }: { visible: boolean }) {
     ws.addEventListener("open", () => {
       reconnectAttemptRef.current = 0;
       consecutiveFailRef.current = 0;
+      resetRequestedRef.current = false;
       const term = termRef.current;
       if (term) {
         // Re-wire input to the new WS
@@ -93,13 +105,14 @@ export default function Terminal({ visible }: { visible: boolean }) {
     if (unmountedRef.current) return;
     const attempt = reconnectAttemptRef.current;
     if (attempt >= MAX_RECONNECT_ATTEMPTS) {
-      // Stop retrying — don't reload the page, as the VM may be gone and
-      // reloading would trigger a provision loop.  The user can still interact
-      // with the rest of the UI (e.g. the Reset button) and refresh manually.
+      // VM is likely gone — trigger re-provisioning instead of giving up.
+      if (resetRequestedRef.current) return;
+      resetRequestedRef.current = true;
       const term = termRef.current;
       if (term) {
-        term.write("\r\n\x1b[2munable to reconnect\x1b[0m\r\n");
+        term.write("\r\n\x1b[2mreconnecting to new environment…\x1b[0m\r\n");
       }
+      resetVmId();
       return;
     }
     const delay = Math.min(
@@ -109,17 +122,17 @@ export default function Terminal({ visible }: { visible: boolean }) {
     reconnectAttemptRef.current = attempt + 1;
     reconnectTimerRef.current = setTimeout(() => {
       if (unmountedRef.current) return;
-      const ws = new WebSocket(buildWsUrl(vmId));
+      const ws = new WebSocket(buildWsUrl());
       ws.binaryType = "arraybuffer";
       wireWs(ws);
     }, delay);
-  }, [vmId, wireWs]);
+  }, [wireWs, resetVmId]);
 
   // Open initial WS eagerly on mount
   useEffect(() => {
     if (!vmId) return;
     unmountedRef.current = false;
-    const ws = new WebSocket(buildWsUrl(vmId));
+    const ws = new WebSocket(buildWsUrl());
     ws.binaryType = "arraybuffer";
     wireWs(ws);
 
@@ -217,4 +230,6 @@ export default function Terminal({ visible }: { visible: boolean }) {
       />
     </div>
   );
-}
+});
+
+export default Terminal;

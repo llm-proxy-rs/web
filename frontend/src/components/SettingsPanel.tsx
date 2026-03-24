@@ -96,15 +96,17 @@ export default function SettingsPanel({
       if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
       const data = await res.json();
       if (data.redirect) {
-        // Need to re-auth through gateway OAuth — only allow same-origin redirects
+        // Need to re-auth through gateway OAuth — only allow https redirects
         try {
-          const url = new URL(data.redirect, window.location.origin);
-          if (url.origin !== window.location.origin) {
-            throw new Error("Cross-origin redirect blocked");
+          const url = new URL(data.redirect);
+          if (url.protocol !== "https:") {
+            throw new Error("Insecure redirect blocked");
           }
           window.location.href = url.href;
-        } catch {
-          throw new Error("Invalid redirect URL");
+        } catch (urlErr) {
+          throw urlErr instanceof Error && urlErr.message.includes("blocked")
+            ? urlErr
+            : new Error("Invalid redirect URL");
         }
         return;
       }

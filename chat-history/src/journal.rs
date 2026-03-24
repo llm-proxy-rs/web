@@ -1,10 +1,10 @@
 use serde::Deserialize;
 
-use crate::Content;
+use crate::{Content, Role};
 
 #[derive(Deserialize)]
 pub(crate) struct JournalMessage {
-    pub(crate) role: String,
+    pub(crate) role: Role,
     pub(crate) content: Content,
 }
 
@@ -16,5 +16,6 @@ pub(crate) struct JournalEntry {
     pub(crate) is_meta: bool,
     #[serde(rename = "isCompactSummary", default)]
     pub(crate) is_compact_summary: bool,
-    pub(crate) message: JournalMessage,
+    #[serde(default)]
+    pub(crate) message: Option<JournalMessage>,
 }
