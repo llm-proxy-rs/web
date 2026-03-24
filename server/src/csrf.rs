@@ -32,7 +32,9 @@ pub(crate) async fn csrf_middleware(session: Session, request: Request, next: Ne
         // Restore a valid token so the session isn't permanently broken
         // after a stale-token race (e.g. concurrent POST requests).
         let new_token = generate_token();
-        let _ = session.insert("csrf_token", &new_token).await;
+        if session.insert("csrf_token", &new_token).await.is_err() {
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response();
+        }
         let mut response = (StatusCode::FORBIDDEN, "Forbidden").into_response();
         attach_csrf_token(&mut response, &new_token);
         return response;
