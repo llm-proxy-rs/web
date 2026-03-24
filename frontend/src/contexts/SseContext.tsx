@@ -95,6 +95,8 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
 
   const csrfTokenRef = useRef(config.current.csrfToken);
   const [csrfToken, setCsrfToken] = useState(config.current.csrfToken);
+  // Serialise POST header exchanges so each request uses the latest rotated token.
+  const csrfReadyRef = useRef<Promise<void>>(Promise.resolve());
 
   const refreshCsrfToken = useCallback((res: Response) => {
     const newToken = res.headers.get("x-csrf-token");
@@ -156,27 +158,40 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
 
   const csrfFetch = useCallback(
     async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-      const existingHeaders = init?.headers;
-      // Merge csrf token without using new Headers() — that would override
-      // the browser's automatic Content-Type for FormData bodies.
-      let merged: Record<string, string>;
-      if (existingHeaders instanceof Headers) {
-        merged = Object.fromEntries(existingHeaders.entries());
-      } else if (Array.isArray(existingHeaders)) {
-        merged = Object.fromEntries(existingHeaders);
-      } else {
-        merged = { ...(existingHeaders as Record<string, string> | undefined) };
+      // Wait for any prior csrf-protected request to receive its response
+      // headers so that csrfTokenRef.current reflects the latest rotation.
+      const prev = csrfReadyRef.current;
+      let release: () => void;
+      csrfReadyRef.current = new Promise<void>((r) => {
+        release = r;
+      });
+      await prev.catch(() => {});
+
+      try {
+        const existingHeaders = init?.headers;
+        // Merge csrf token without using new Headers() — that would override
+        // the browser's automatic Content-Type for FormData bodies.
+        let merged: Record<string, string>;
+        if (existingHeaders instanceof Headers) {
+          merged = Object.fromEntries(existingHeaders.entries());
+        } else if (Array.isArray(existingHeaders)) {
+          merged = Object.fromEntries(existingHeaders);
+        } else {
+          merged = { ...(existingHeaders as Record<string, string> | undefined) };
+        }
+        if (!merged["x-csrf-token"]) {
+          merged["x-csrf-token"] = csrfTokenRef.current;
+        }
+        const res = await fetch(input, { ...init, headers: merged });
+        const newToken = res.headers.get("x-csrf-token");
+        if (newToken) {
+          csrfTokenRef.current = newToken;
+          setCsrfToken(newToken);
+        }
+        return res;
+      } finally {
+        release!();
       }
-      if (!merged["x-csrf-token"]) {
-        merged["x-csrf-token"] = csrfTokenRef.current;
-      }
-      const res = await fetch(input, { ...init, headers: merged });
-      const newToken = res.headers.get("x-csrf-token");
-      if (newToken) {
-        csrfTokenRef.current = newToken;
-        setCsrfToken(newToken);
-      }
-      return res;
     },
     [],
   );

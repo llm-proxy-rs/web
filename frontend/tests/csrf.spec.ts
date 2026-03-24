@@ -2,6 +2,7 @@
  * UF-53  Initial token sent      — first POST /chat carries the token from data-csrf-token
  * UF-54  Token rotated on send   — when server returns x-csrf-token, the next POST uses it
  * UF-55  Token rotated on delete — when server returns x-csrf-token, the next DELETE uses it
+ * UF-57  Serialised CSRF fetch   — back-to-back POSTs use sequentially rotated tokens
  */
 import { test, expect } from "@playwright/test";
 import {
@@ -125,5 +126,38 @@ test.describe("csrf", () => {
     await deleteResponse;
 
     expect(ctrl.lastDeleteCsrfToken()).toBe("rotated-1");
+  });
+
+  test("UF-57 back-to-back sends use sequentially rotated tokens (no stale-token race)", async ({
+    page,
+  }) => {
+    const ctrl = await setupApp(page, {});
+
+    // First send — server rotates token to "rotated-A"
+    ctrl.setChatResponseToken("rotated-A");
+    ctrl.sendSseEvents([
+      { event: "done", data: { session_id: null, task_id: "t1" } },
+    ]);
+    const firstResponse = page.waitForResponse("**/chat");
+    await sendMessage(page, "msg-1");
+    await firstResponse;
+
+    // Wait for composer to re-enable
+    await expect(page.getByPlaceholder("Message Claude…")).toBeEnabled();
+
+    // Start new chat and send immediately — server rotates token to "rotated-B"
+    await page.getByRole("button", { name: "New Chat" }).click();
+    ctrl.setChatResponseToken("rotated-B");
+    ctrl.sendSseEvents([
+      { event: "done", data: { session_id: null, task_id: "t2" } },
+    ]);
+    const secondResponse = page.waitForResponse("**/chat");
+    await sendMessage(page, "msg-2");
+    await secondResponse;
+
+    // Both POSTs must use the correctly rotated token — no stale reuse
+    const bodies = ctrl.allChatBodies();
+    expect(bodies[0].csrf_token).toBe(CSRF_TOKEN);
+    expect(bodies[1].csrf_token).toBe("rotated-A");
   });
 });
