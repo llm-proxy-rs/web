@@ -177,6 +177,7 @@ export function useSseHandlers(
     setViewConversationId,
     setStreamPhase,
     generateId,
+    touchConversation,
   } = chatState;
 
   const viewRef = useRef(viewConversationId);
@@ -217,6 +218,11 @@ export function useSseHandlers(
     function handleEvent(event: SseEvent) {
       const conversationId = resolveConversationId(event);
 
+      // Track activity for staleness detection
+      if (conversationId) {
+        touchConversation(conversationId);
+      }
+
       // For events that require a session but don't have one, skip
       // (shouldn't happen once tagging is in place)
       const session = conversationId;
@@ -239,6 +245,9 @@ export function useSseHandlers(
       switch (event.type) {
         case "task_created": {
           const { task_id, conversation_id } = event.payload;
+          console.debug(
+            `[queue] task_created conv=${conversation_id} task=${task_id}`,
+          );
           const state = getOrCreateStreamState(
             streamStateRef.current,
             conversation_id,
@@ -423,6 +432,9 @@ export function useSseHandlers(
 
         case "done": {
           const { session_id, task_id, conversation_id } = event.payload;
+          console.debug(
+            `[queue] done conv=${conversation_id} task=${task_id} session=${session_id}`,
+          );
           setStreamPhase(conversation_id, { phase: "idle" });
           const doneState = getOrCreateStreamState(
             streamStateRef.current,
@@ -483,6 +495,9 @@ export function useSseHandlers(
 
         case "error_event": {
           const { message } = event.payload;
+          console.debug(
+            `[queue] error_event conv=${session} message=${JSON.stringify(message.slice(0, 80))}`,
+          );
           if (ss && ss.taskId) {
             schedulerRef.current.forceFlush(
               () => getMessages(session),
@@ -495,7 +510,9 @@ export function useSseHandlers(
           if (session) {
             setStreamPhase(session, { phase: "idle" });
             removeRunningConversation(session);
-            setSessionPendingQuestion(session, null);
+            // Do not clear a pending question on connection drop — the server
+            // may still be waiting for the user's answer, so preserve it.
+            // The question is cleared when the user answers or when `done` fires.
             streamStateRef.current.delete(session);
           }
           // If no session tagged, remove all running (fallback for untagged errors)
@@ -510,6 +527,7 @@ export function useSseHandlers(
 
         case "query_aborted": {
           const abortedId = event.conversationId;
+          console.debug(`[queue] query_aborted conv=${abortedId}`);
           setStreamPhase(abortedId, { phase: "idle" });
           removeRunningConversation(abortedId);
           streamStateRef.current.delete(abortedId);

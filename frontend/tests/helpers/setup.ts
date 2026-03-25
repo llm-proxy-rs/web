@@ -153,6 +153,12 @@ export const sse = {
     },
     // done is sent separately after the user answers
   ],
+
+  error: (message: string): SseEvent[] => [
+    { event: "session_start", data: { task_id: DEFAULT_CLIENT_SESSION_ID } },
+    { event: "init" },
+    { event: "error_event", data: { message } },
+  ],
 };
 
 // ── Mock session data (server-side history) ──────────────────────────────

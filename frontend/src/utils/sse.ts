@@ -163,6 +163,7 @@ export function attachEventSourceListeners(
   es: EventSource,
   pushEvent: (e: SseEvent) => void,
   vmId: string,
+  onConnectionError?: () => void,
 ): void {
   const add = (name: string, handler: (e: MessageEvent) => void) => {
     es.addEventListener(name, handler as EventListener);
@@ -227,5 +228,6 @@ export function attachEventSourceListeners(
   });
   es.onerror = () => {
     es.close();
+    onConnectionError?.();
   };
 }

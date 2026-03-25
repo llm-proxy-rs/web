@@ -13,6 +13,8 @@ export interface ChatStateResult {
   addRunningConversation: (id: string) => void;
   removeRunningConversation: (id: string) => void;
   isConversationRunning: (id: string) => boolean;
+  touchConversation: (id: string) => void;
+  lastActivityByConversation: React.MutableRefObject<Map<string, number>>;
   getSessionPendingQuestion: (
     conversationId: string | null,
   ) => PendingQuestion | null;
@@ -58,6 +60,7 @@ export function useChatState(): ChatStateResult {
   const taskIdBySession = useRef<Map<string, string>>(new Map());
   const streamPhaseBySession = useRef<Map<string, StreamPhaseInfo>>(new Map());
   const queueBySession = useRef<Map<string, string[]>>(new Map());
+  const lastActivityByConversation = useRef<Map<string, number>>(new Map());
   const [viewConversationId, setViewConversationId] = useState<string | null>(
     null,
   );
@@ -70,17 +73,35 @@ export function useChatState(): ChatStateResult {
   const bumpRender = useCallback(() => setRenderTick((t) => t + 1), []);
 
   const addRunningConversation = useCallback((id: string) => {
+    const wasRunning = runningConversationIdsRef.current.has(id);
     runningConversationIdsRef.current.add(id);
+    lastActivityByConversation.current.set(id, Date.now());
+    if (wasRunning) {
+      console.warn(`[queue] addRunning conv=${id} ALREADY RUNNING`);
+    } else {
+      console.debug(`[queue] addRunning conv=${id}`);
+    }
     setRunningConversationIds(new Set(runningConversationIdsRef.current));
   }, []);
 
   const removeRunningConversation = useCallback((id: string) => {
+    const wasRunning = runningConversationIdsRef.current.has(id);
     runningConversationIdsRef.current.delete(id);
+    lastActivityByConversation.current.delete(id);
+    if (!wasRunning) {
+      console.warn(`[queue] removeRunning conv=${id} WAS NOT RUNNING`);
+    } else {
+      console.debug(`[queue] removeRunning conv=${id}`);
+    }
     setRunningConversationIds(new Set(runningConversationIdsRef.current));
   }, []);
 
   const isConversationRunning = useCallback((id: string): boolean => {
     return runningConversationIdsRef.current.has(id);
+  }, []);
+
+  const touchConversation = useCallback((id: string) => {
+    lastActivityByConversation.current.set(id, Date.now());
   }, []);
 
   const getTaskId = useCallback(
@@ -269,6 +290,8 @@ export function useChatState(): ChatStateResult {
     addRunningConversation,
     removeRunningConversation,
     isConversationRunning,
+    touchConversation,
+    lastActivityByConversation,
     getSessionPendingQuestion,
     setSessionPendingQuestion,
     getTaskId,

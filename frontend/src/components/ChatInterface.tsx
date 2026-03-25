@@ -60,6 +60,7 @@ export default function ChatInterface({
     removeFromQueue,
     clearQueue,
     shiftQueue,
+    lastActivityByConversation,
   } = chatState;
 
   // Fire whenever the user clicks "New Chat" — even if selectedConversation was
@@ -185,6 +186,10 @@ export default function ChatInterface({
       );
       const sessionId = conversation?.sessionId;
 
+      console.debug(
+        `[queue] dispatchTo conv=${targetConversationId} session=${sessionId ?? "new"} text=${JSON.stringify(text.slice(0, 60))}`,
+      );
+
       addMessage(targetConversationId, {
         id: generateId(),
         type: "user",
@@ -224,14 +229,21 @@ export default function ChatInterface({
 
   const handleSend = useCallback(
     (text: string) => {
-      // If the current conversation is running, queue the message
+      // If the current conversation is running or draining its queue, queue the message
       if (
         viewConversationId !== null &&
-        isConversationRunning(viewConversationId)
+        (isConversationRunning(viewConversationId) ||
+          drainingRef.current.has(viewConversationId))
       ) {
+        console.debug(
+          `[queue] enqueue conv=${viewConversationId} running=${isConversationRunning(viewConversationId)} draining=${drainingRef.current.has(viewConversationId)} text=${JSON.stringify(text.slice(0, 60))}`,
+        );
         addToQueue(viewConversationId, text);
         return;
       }
+      console.debug(
+        `[queue] dispatch conv=${viewConversationId} text=${JSON.stringify(text.slice(0, 60))}`,
+      );
       dispatchMessage(text);
     },
     [viewConversationId, isConversationRunning, dispatchMessage, addToQueue],
@@ -294,18 +306,59 @@ export default function ChatInterface({
   // Compares the current runningConversationIds with the previous snapshot
   // to find conversations that just finished, then dispatches their next queued message.
   const prevRunningIdsRef = useRef<Set<string>>(new Set());
+  const drainingRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     const prev = prevRunningIdsRef.current;
     prevRunningIdsRef.current = new Set(runningConversationIds);
     for (const convId of prev) {
-      if (!runningConversationIds.has(convId)) {
+      if (
+        !runningConversationIds.has(convId) &&
+        !drainingRef.current.has(convId)
+      ) {
         const next = shiftQueue(convId);
         if (next !== undefined) {
-          setTimeout(() => dispatchMessageTo(convId, next), 100);
+          console.debug(
+            `[queue] drain conv=${convId} text=${JSON.stringify(next.slice(0, 60))}`,
+          );
+          drainingRef.current.add(convId);
+          // Use microtask to let the current state update flush before dispatching
+          // the next message, avoiding React batching the remove + add into a no-op.
+          Promise.resolve().then(() => {
+            drainingRef.current.delete(convId);
+            dispatchMessageTo(convId, next);
+          });
+        } else {
+          console.debug(`[queue] conv=${convId} finished, queue empty`);
         }
       }
     }
   }, [runningConversationIds, shiftQueue, dispatchMessageTo]);
+
+  // Staleness watchdog: if a running conversation hasn't received any SSE event
+  // (including server heartbeats sent every 60s) for 90s, assume the connection
+  // is dead and remove it from running so the queue can drain.
+  useEffect(() => {
+    if (runningConversationIds.size === 0) return;
+    const STALE_MS = 90_000;
+    const CHECK_MS = 15_000;
+    const interval = setInterval(() => {
+      const now = Date.now();
+      for (const convId of runningConversationIds) {
+        const lastActivity = lastActivityByConversation.current.get(convId);
+        if (lastActivity !== undefined && now - lastActivity > STALE_MS) {
+          console.warn(
+            `Conversation ${convId} stale for ${STALE_MS}ms, marking idle`,
+          );
+          removeRunningConversation(convId);
+        }
+      }
+    }, CHECK_MS);
+    return () => clearInterval(interval);
+  }, [
+    runningConversationIds,
+    removeRunningConversation,
+    lastActivityByConversation,
+  ]);
 
   const handleRemoveQueued = useCallback(
     (index: number) => {
