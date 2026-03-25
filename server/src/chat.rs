@@ -144,11 +144,9 @@ pub(crate) async fn handle_chat_question_answer(
     State(state): State<AppState>,
     Json(body): Json<QuestionAnswerBody>,
 ) -> Result<Response, AppError> {
-    let request_id = Uuid::parse_str(&body.request_id)
-        .map_err(|_| anyhow!("invalid request_id: expected UUID"))?
-        .to_string();
+    // request_id is an opaque tool_use_id from the Claude SDK (not a UUID)
     let agent_message = AgentMessage::QuestionAnswer {
-        request_id,
+        request_id: body.request_id,
         answers: body.answers,
     };
     dispatch_agent_message(&user_vm, &state, &agent_message).await?;
