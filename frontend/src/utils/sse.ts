@@ -168,6 +168,11 @@ export async function readFetchSseStream(
     }
   } finally {
     reader.releaseLock();
+    // Cancel the unconsumed portion of the response body so the browser
+    // releases the underlying HTTP connection.  Without this, Firefox keeps
+    // the connection "in use" after we break on a done/error_event, and the
+    // next POST to the same URL gets NS_BINDING_ABORTED.
+    response.body.cancel().catch(() => {});
   }
 }
 

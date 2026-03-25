@@ -2498,5 +2498,59 @@ class TestBuildPromptStream(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(items[0]["message"]["content"], "")
 
 
+class TestQuerySemaphore(unittest.IsolatedAsyncioTestCase):
+    """Verify the concurrency semaphore limits parallel run_query calls."""
+
+    def test_semaphore_default_allows_three_concurrent(self):
+        self.assertEqual(agent._query_semaphore._value, 3)
+
+    async def test_concurrent_queries_limited_by_semaphore(self):
+        """With semaphore(1), a second query must wait for the first to finish."""
+        original = agent._query_semaphore
+        agent._query_semaphore = asyncio.Semaphore(1)
+        try:
+            order: list[str] = []
+            event = asyncio.Event()
+
+            async def slow_query(*args, **kwargs):
+                order.append("slow_start")
+                await event.wait()
+                order.append("slow_end")
+
+            async def fast_query(*args, **kwargs):
+                order.append("fast_start")
+                order.append("fast_end")
+
+            with unittest.mock.patch.object(
+                agent, "_run_query_inner", side_effect=slow_query
+            ):
+                task1 = asyncio.create_task(
+                    agent.run_query("a", None, "t1", "c1", "/tmp")
+                )
+                await asyncio.sleep(0)  # let task1 acquire semaphore
+
+            with unittest.mock.patch.object(
+                agent, "_run_query_inner", side_effect=fast_query
+            ):
+                task2 = asyncio.create_task(
+                    agent.run_query("b", None, "t2", "c2", "/tmp")
+                )
+                await asyncio.sleep(0)  # task2 should be waiting
+
+                # Only slow_start should have fired
+                self.assertEqual(order, ["slow_start"])
+
+                # Release slow query
+                event.set()
+                await asyncio.gather(task1, task2)
+
+            # fast_query should run after slow_query finishes
+            self.assertEqual(
+                order, ["slow_start", "slow_end", "fast_start", "fast_end"]
+            )
+        finally:
+            agent._query_semaphore = original
+
+
 if __name__ == "__main__":
     unittest.main()

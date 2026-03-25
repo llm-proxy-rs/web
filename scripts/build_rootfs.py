@@ -320,7 +320,7 @@ def install_agent(rootfs: Path, mcp_base_url: str | None = None) -> None:
         parsed = urlparse(mcp_base_url)
         host = parsed.hostname
         # Validate hostname to prevent injection into the systemd service file.
-        if not host or not re.match(r'^[a-zA-Z0-9._-]+$', host):
+        if not host or not re.match(r"^[a-zA-Z0-9._-]+$", host):
             sys.exit(f"error: invalid hostname in --mcp-base-url: {host!r}")
         port = parsed.port or (443 if parsed.scheme == "https" else 80)
         if parsed.scheme == "https":
@@ -363,7 +363,7 @@ WantedBy=multi-user.target
             "-",
             "ubuntu",
             "-c",
-            "bash -lc '/usr/local/bin/uv run --with claude-agent-sdk"
+            'bash -lc \'/usr/local/bin/uv run --with "claude-agent-sdk>=0.1.50"'
             ' python3 -c "import claude_agent_sdk"\'',
         ],
     )

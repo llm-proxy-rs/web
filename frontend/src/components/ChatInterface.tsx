@@ -413,6 +413,11 @@ export default function ChatInterface({
           console.warn(
             `Conversation ${convId} stale for ${STALE_MS}ms, marking idle`,
           );
+          // Abort the dead in-flight fetch BEFORE removing from running.
+          // This ensures the old connection is fully torn down before the
+          // queue drain fires a replacement request, avoiding browser-level
+          // NS_BINDING_ABORTED errors from rapid abort-then-reconnect.
+          sseCtx.abortQuery(convId);
           removeRunningConversation(convId);
         }
       }
@@ -423,6 +428,7 @@ export default function ChatInterface({
     removeRunningConversation,
     lastActivityByConversation,
     getSessionPendingQuestion,
+    sseCtx,
   ]);
 
   const handleRemoveQueued = useCallback(
@@ -494,6 +500,7 @@ export default function ChatInterface({
       />
       <div className="mx-auto w-full max-w-3xl">
         <ClaudeStatus
+          key={viewConversationId ?? "none"}
           isLoading={isCurrentRunning}
           streamPhase={streamPhase}
           onAbort={handleStop}
