@@ -16,6 +16,7 @@
  * UF-92  New chat during in-flight message
  * UF-93  Queue drains after error event — error cleans up running state so queue continues
  * UF-94  Rapid send during drain — draining guard prevents double dispatch
+ * UF-95  Queue drawer scrolls when many messages are queued — max height with overflow
  */
 import { test, expect } from "@playwright/test";
 import { setupApp, sendMessage, sse } from "./helpers/setup";
@@ -367,6 +368,33 @@ test.describe("message queue", () => {
     expect(bodies[0].content).toBe("First");
     expect(bodies[1].content).toBe("Second");
     expect(bodies[2].content).toBe("Third");
+  });
+
+  test("UF-95 queue drawer scrolls when many messages are queued", async ({
+    page,
+  }) => {
+    await setupApp(page, {});
+
+    // Start streaming
+    await sendMessage(page, "First");
+
+    // Queue enough messages to exceed the drawer max height
+    await sendMessage(page, "Queued A");
+    await sendMessage(page, "Queued B");
+    await sendMessage(page, "Queued C");
+    await sendMessage(page, "Queued D");
+    await sendMessage(page, "Queued E");
+
+    await expect(page.getByText("Queued messages (5)")).toBeVisible();
+
+    // The queue list container should be scrollable (scrollHeight > clientHeight)
+    const queueList = page.getByTestId("queue-list");
+    await expect(queueList).toBeVisible();
+
+    const isScrollable = await queueList.evaluate(
+      (el) => el.scrollHeight > el.clientHeight,
+    );
+    expect(isScrollable).toBe(true);
   });
 
   test("UF-92 new chat works while a queued message is still in-flight", async ({

@@ -44,7 +44,10 @@ export default function QueueDrawer({
 
         {/* Queue items */}
         {!collapsed && (
-          <div className="mt-1.5 mb-1 flex flex-col gap-1">
+          <div
+            data-testid="queue-list"
+            className="mt-1.5 mb-1 flex max-h-32 flex-col gap-1 overflow-y-auto"
+          >
             {messages.map((msg, i) => (
               <div
                 key={`${i}-${msg.slice(0, 20)}`}
