@@ -1,6 +1,6 @@
 /**
  * UF-60  sendQuery network error   — POST /chat 500 adds an error message in chat and clears status bar
- * UF-61  answerQuestion network error — POST /chat-question-answer 500 dismisses the panel; no crash
+ * UF-61  answerQuestion network error — POST /chat-question-answer 500 keeps panel visible for retry; no crash
  * UF-62  POST /chat 503 (VM starting) — silently ignored, no error in chat
  */
 import { test, expect } from "@playwright/test";
@@ -34,7 +34,7 @@ test.describe("error-handling", () => {
     void ctrl;
   });
 
-  test("UF-61 POST /chat-question-answer 500 dismisses the panel without crashing", async ({
+  test("UF-61 POST /chat-question-answer 500 keeps panel visible for retry without crashing", async ({
     page,
   }) => {
     const ctrl = await setupApp(page, {
@@ -58,14 +58,18 @@ test.describe("error-handling", () => {
     await expect(page.getByText("Claude needs your input")).toBeVisible();
     await page.getByRole("button", { name: "Yes" }).click();
 
-    // Submit triggers: setSessionPendingQuestion(null) BEFORE await answerQuestion(...)
-    // Panel dismisses immediately; the 500 is an unhandled rejection (no catch in handleAnswerQuestion)
+    // Submit triggers the POST; the 500 causes the catch branch to keep the panel visible for retry
     await page.getByRole("button", { name: "Submit" }).click();
 
-    // Panel is gone
-    await expect(page.getByText("Claude needs your input")).not.toBeVisible();
+    // Wait for the failed POST to complete
+    await page.waitForResponse(
+      (r) => r.url().includes("chat-question-answer") && r.status() === 500,
+    );
 
-    // No error message in chat (the error is not caught and rendered — it is swallowed)
+    // Panel stays visible so the user can retry (same behaviour as UF-96)
+    await expect(page.getByText("Claude needs your input")).toBeVisible();
+
+    // No error message in chat (the error is not propagated to the message list)
     await expect(page.getByText("Error:")).not.toBeVisible();
   });
 
