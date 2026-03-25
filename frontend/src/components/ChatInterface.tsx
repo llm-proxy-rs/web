@@ -232,6 +232,12 @@ export default function ChatInterface({
   const prevRunningIdsRef = useRef<Set<string>>(new Set());
   const drainingRef = useRef<Set<string>>(new Set());
   const pendingDrainRef = useRef<Set<string>>(new Set());
+  // Tracks consecutive stale timeouts per conversation.  On the first stale
+  // timeout the drain is allowed (reconnect attempt).  On the second
+  // consecutive stale the connection is presumed dead and drain is skipped to
+  // break the infinite loop.  The counter resets when a task completes normally
+  // (done event) or the user manually sends a new message.
+  const staleCountRef = useRef<Map<string, number>>(new Map());
 
   const drainConversation = useCallback(
     (convId: string) => {
@@ -255,6 +261,11 @@ export default function ChatInterface({
 
   const handleSend = useCallback(
     (text: string) => {
+      // Clear stale counter — the user is actively sending, so the connection
+      // should be re-established and the queue can resume normally.
+      if (viewConversationId) {
+        staleCountRef.current.delete(viewConversationId);
+      }
       // If the current conversation is running or draining its queue, queue the message
       if (
         viewConversationId !== null &&
@@ -379,6 +390,23 @@ export default function ChatInterface({
         !runningConversationIds.has(convId) &&
         !drainingRef.current.has(convId)
       ) {
+        // If the conversation went stale twice in a row, the connection is
+        // dead — skip the drain to break the infinite loop.  A single stale
+        // timeout is allowed (reconnect attempt).
+        const staleCount = staleCountRef.current.get(convId) ?? 0;
+        if (staleCount > 1) {
+          console.debug(
+            `[queue] conv=${convId} stale ${staleCount} times consecutively, skipping drain`,
+          );
+          continue;
+        }
+        // Only reset the stale counter on a clean (non-stale) completion.
+        // If staleCount > 0 the task was removed by the watchdog — preserve
+        // the counter so the next watchdog expiry is correctly seen as the
+        // second consecutive stale and the drain is blocked.
+        if (staleCount === 0) {
+          staleCountRef.current.delete(convId);
+        }
         if (getSessionPendingQuestion(convId)) {
           // Defer drain until the question is answered
           console.debug(
@@ -413,6 +441,16 @@ export default function ChatInterface({
           console.warn(
             `Conversation ${convId} stale for ${STALE_MS}ms, marking idle`,
           );
+          // Mark as staled so the drain effect skips this conversation
+          // instead of dispatching the next queued message into a dead
+          // connection (which would just loop forever).
+          const count = (staleCountRef.current.get(convId) ?? 0) + 1;
+          staleCountRef.current.set(convId, count);
+          // Abort the dead in-flight fetch BEFORE removing from running.
+          // This ensures the old connection is fully torn down before the
+          // queue drain fires a replacement request, avoiding browser-level
+          // NS_BINDING_ABORTED errors from rapid abort-then-reconnect.
+          sseCtx.abortQuery(convId);
           removeRunningConversation(convId);
         }
       }
@@ -423,6 +461,7 @@ export default function ChatInterface({
     removeRunningConversation,
     lastActivityByConversation,
     getSessionPendingQuestion,
+    sseCtx,
   ]);
 
   const handleRemoveQueued = useCallback(
@@ -494,6 +533,7 @@ export default function ChatInterface({
       />
       <div className="mx-auto w-full max-w-3xl">
         <ClaudeStatus
+          key={viewConversationId ?? "none"}
           isLoading={isCurrentRunning}
           streamPhase={streamPhase}
           onAbort={handleStop}

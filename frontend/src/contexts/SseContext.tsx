@@ -324,7 +324,16 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
       };
       executeStream()
         .catch((err: unknown) => {
-          if (err instanceof DOMException && err.name === "AbortError") {
+          // Only silently swallow aborts that WE triggered via AbortController.
+          // Firefox may throw AbortError or NS_BINDING_ABORTED for browser-
+          // initiated cancellations (e.g. rapid request replacement to the same
+          // URL).  Those must surface as error_event so running state is cleaned
+          // up and the user can retry.
+          if (
+            err instanceof DOMException &&
+            err.name === "AbortError" &&
+            abortController.signal.aborted
+          ) {
             console.warn(
               `[queue] query aborted for conv=${conversationId} (superseded by new query)`,
             );

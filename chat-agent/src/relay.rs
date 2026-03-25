@@ -69,6 +69,10 @@ async fn run_task_stream(
                     return Ok(());
                 }
             }
+            _ = tx.closed() => {
+                info!("client disconnected during connect");
+                return Ok(());
+            }
         }
     };
     match connect_result {
@@ -168,6 +172,12 @@ async fn stream_ssh_channel(
                 if !send_sse(tx, Bytes::from_static(b": keep-alive\n\n")).await {
                     break;
                 }
+            }
+            // Detect when the HTTP response body (receiver) is dropped —
+            // e.g. client disconnected or frontend aborted the request.
+            _ = tx.closed() => {
+                info!("client disconnected, closing agent stream");
+                break;
             }
         }
     }

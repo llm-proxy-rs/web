@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.14"
-# dependencies = ["claude-agent-sdk"]
+# dependencies = ["claude-agent-sdk>=0.1.50"]
 # ///
 import asyncio
 import contextvars
@@ -77,6 +77,12 @@ class Session:
 
 # All live sessions keyed by task_id (a server-generated UUID).
 _sessions: dict[str, Session] = {}
+
+# Limit concurrent run_query tasks to avoid resource exhaustion on the VM.
+# Configurable via AGENT_MAX_CONCURRENT_QUERIES (default 3).
+_query_semaphore = asyncio.Semaphore(
+    int(os.environ.get("AGENT_MAX_CONCURRENT_QUERIES", "3"))
+)
 
 # Per-task context vars: set at task-creation time so emit_sse always routes to
 # the connection that submitted the query, even as _sessions[id].writer changes
@@ -298,6 +304,19 @@ async def run_query(
     conversation_id: str,
     work_dir: str,
 ):
+    async with _query_semaphore:
+        await _run_query_inner(
+            content, sdk_session_id, task_id, conversation_id, work_dir
+        )
+
+
+async def _run_query_inner(
+    content: str,
+    sdk_session_id: str | None,
+    task_id: str,
+    conversation_id: str,
+    work_dir: str,
+):
     from claude_agent_sdk import ClaudeAgentOptions, PermissionResultAllow, query
     from claude_agent_sdk.types import HookMatcher, StreamEvent
 
@@ -400,7 +419,7 @@ async def run_query(
         for attr in ("stderr", "output", "returncode", "cmd", "exit_code"):
             if hasattr(exc, attr):
                 log(f"query error {attr}: {getattr(exc, attr)!r}")
-        emit_sse("error_event", {"message": "An internal error occurred"})
+        emit_sse("error_event", {"message": str(exc) or "An internal error occurred"})
     finally:
         log(f"query done  task_id={task_id!r}  session_id={captured_session_id!r}")
         emit_sse(
