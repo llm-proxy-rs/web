@@ -11,6 +11,7 @@ import type {
 } from "../types";
 import type { ChatStateResult } from "./useChatState";
 import { buildMessagesFromTranscript } from "../utils/transcript";
+import { setRunningTask, removeRunningTask } from "../utils/runningTasks";
 
 interface SseHandlerDeps {
   eventQueueRef: MutableRefObject<SseEvent[]>;
@@ -262,10 +263,7 @@ export function useSseHandlers(
           if (ss) ss.taskId = task_id;
           if (session) {
             setTaskId(session, task_id);
-            localStorage.setItem(
-              `chat_running_task_${vmId}`,
-              JSON.stringify({ task_id, running_session_id: session }),
-            );
+            setRunningTask(vmId, session, task_id);
           }
           break;
         }
@@ -512,6 +510,7 @@ export function useSseHandlers(
           if (session) {
             setStreamPhase(session, { phase: "idle" });
             removeRunningConversation(session);
+            removeRunningTask(vmId, session);
             // Do not clear a pending question on connection drop — the server
             // may still be waiting for the user's answer, so preserve it.
             // The question is cleared when the user answers or when `done` fires.

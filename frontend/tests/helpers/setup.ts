@@ -260,8 +260,20 @@ export interface ChatBody {
 }
 
 export interface AppController {
-  /** Push SSE events through the currently open stream. */
+  /** Push SSE events through the currently open stream (global FIFO). */
   sendSseEvents(events: SseEvent[]): void;
+  /**
+   * Push SSE events targeted at a specific conversation's next POST /chat.
+   * Use this when multiple conversations may have concurrent in-flight requests
+   * (e.g. background queue drain + new conversation) to avoid event misrouting.
+   */
+  sendSseEventsTo(conversationId: string, events: SseEvent[]): void;
+  /**
+   * Returns a promise that resolves with the body of the next POST /chat that
+   * arrives at the mock server.  Useful for synchronising with background
+   * queue-drain requests whose conversation IDs are not known ahead of time.
+   */
+  waitForNextChatPost(): Promise<ChatBody>;
   /** Replace the session list returned by subsequent /chat-history calls. */
   setSessions(sessions: Session[]): void;
   /** Replace the file entries returned for a given directory path. */
@@ -345,6 +357,7 @@ export async function setupApp(
   };
 
   const chatBodies: ChatBody[] = [];
+  const chatPostNotifiers: Array<(body: ChatBody) => void> = [];
   let stopReceived = false;
   let lastStopBody: { task_id: string } | null = null;
   let lastAnswer: {
@@ -361,18 +374,75 @@ export async function setupApp(
   let renewGatewayKeyReceived = false;
 
   // SSE event delivery — shared between POST /chat and GET /chat-stream/**
-  let resolveSse: ((events: SseEvent[]) => void) | null = null;
-  let queuedSseEvents: SseEvent[] | null = null;
+  //
+  // Two-tier delivery system:
+  //   1. Per-conversation queues (used when the caller supplies a conversationId
+  //      via sendSseEventsTo).  A waiting POST /chat handler for that specific
+  //      conversation always wins.
+  //   2. Global FIFO fallback (used by the plain sendSseEvents call).  A POST
+  //      /chat handler first checks its own per-conversation queue; if empty it
+  //      falls back to the global queue.  This preserves backward compatibility
+  //      for single-conversation tests.
+  //
+  // Using sendSseEventsTo is recommended whenever two or more conversations can
+  // have concurrent in-flight POST /chat requests (e.g. background queue drain
+  // while a new conversation is also sending a message).
+  const sseQueueByConversation = new Map<string, SseEvent[][]>();
+  const sseWaitersByConversation = new Map<
+    string,
+    Array<(events: SseEvent[]) => void>
+  >();
+  const sseFallbackQueue: SseEvent[][] = [];
 
-  function waitForSseEvents(): Promise<SseEvent[]> {
-    if (queuedSseEvents !== null) {
-      const events = queuedSseEvents;
-      queuedSseEvents = null;
-      return Promise.resolve(events);
+  function waitForSseEvents(conversationId: string): Promise<SseEvent[]> {
+    // 1. Check per-conversation queue first (populated by sendSseEventsTo)
+    const convQueue = sseQueueByConversation.get(conversationId);
+    if (convQueue && convQueue.length > 0) {
+      return Promise.resolve(convQueue.shift()!);
     }
+    // 2. Check global fallback queue (populated by sendSseEvents)
+    if (sseFallbackQueue.length > 0) {
+      return Promise.resolve(sseFallbackQueue.shift()!);
+    }
+    // 3. Park as a per-conversation waiter; sendSseEventsTo targets it
+    //    precisely while sendSseEvents wakes any parked waiter in FIFO order.
     return new Promise<SseEvent[]>((resolve) => {
-      resolveSse = resolve;
+      if (!sseWaitersByConversation.has(conversationId)) {
+        sseWaitersByConversation.set(conversationId, []);
+      }
+      sseWaitersByConversation.get(conversationId)!.push(resolve);
     });
+  }
+
+  function deliverSseEvents(events: SseEvent[], conversationId?: string): void {
+    if (conversationId) {
+      // Targeted delivery: resolve a waiter for this conversation if one exists,
+      // otherwise enqueue in the per-conversation queue.
+      const waiters = sseWaitersByConversation.get(conversationId);
+      if (waiters && waiters.length > 0) {
+        const resolve = waiters.shift()!;
+        if (waiters.length === 0)
+          sseWaitersByConversation.delete(conversationId);
+        resolve(events);
+        return;
+      }
+      if (!sseQueueByConversation.has(conversationId)) {
+        sseQueueByConversation.set(conversationId, []);
+      }
+      sseQueueByConversation.get(conversationId)!.push(events);
+      return;
+    }
+    // Untargeted delivery: wake the first parked waiter (any conversation) or
+    // push to the global fallback queue.
+    for (const [convId, waiters] of sseWaitersByConversation) {
+      if (waiters.length > 0) {
+        const resolve = waiters.shift()!;
+        if (waiters.length === 0) sseWaitersByConversation.delete(convId);
+        resolve(events);
+        return;
+      }
+    }
+    sseFallbackQueue.push(events);
   }
 
   // ── Pre-seed conversations into localStorage ──────────────────────────────
@@ -555,7 +625,7 @@ export async function setupApp(
     const reconnectConversationId =
       url.searchParams.get("conversation_id") ?? "";
 
-    const events = await waitForSseEvents();
+    const events = await waitForSseEvents(reconnectConversationId);
     const injectedEvents = injectConversationId(
       events,
       reconnectConversationId,
@@ -586,10 +656,15 @@ export async function setupApp(
     const body = route.request().postDataJSON() as Omit<ChatBody, "csrf_token">;
     const csrf_token =
       (await route.request().headerValue("x-csrf-token")) ?? null;
-    chatBodies.push({ ...body, csrf_token });
+    const fullBody: ChatBody = { ...body, csrf_token };
+    chatBodies.push(fullBody);
+    // Notify any test waiting for the next chat POST
+    if (chatPostNotifiers.length > 0) {
+      chatPostNotifiers.shift()!(fullBody);
+    }
     const conversationId = body.conversation_id;
 
-    const events = await waitForSseEvents();
+    const events = await waitForSseEvents(conversationId);
     const injectedEvents = injectConversationId(events, conversationId);
 
     // Prepend task_created event so the frontend learns the task_id
@@ -627,14 +702,15 @@ export async function setupApp(
 
   return {
     sendSseEvents: (events) => {
-      if (resolveSse) {
-        const resolve = resolveSse;
-        resolveSse = null;
-        resolve(events);
-      } else {
-        queuedSseEvents = events;
-      }
+      deliverSseEvents(events);
     },
+    sendSseEventsTo: (conversationId, events) => {
+      deliverSseEvents(events, conversationId);
+    },
+    waitForNextChatPost: () =>
+      new Promise<ChatBody>((resolve) => {
+        chatPostNotifiers.push(resolve);
+      }),
     setSessions: (s) => {
       sessions = s;
     },

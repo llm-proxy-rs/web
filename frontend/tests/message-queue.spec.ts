@@ -428,4 +428,41 @@ test.describe("message queue", () => {
     expect(bodies[1].content).toBe("Msg2");
     expect(bodies[2].content).toBe("New chat msg");
   });
+
+  test("UF-96 done from conv A does not clear conv B running task in localStorage", async ({
+    page,
+  }) => {
+    const ctrl = await setupApp(page, {});
+
+    // Start conv A
+    await sendMessage(page, "Conv-A msg");
+
+    // Complete conv A — this stores session info then clears it on done
+    ctrl.sendSseEvents(sse.text("Reply A", "sess-a"));
+    await expect(page.getByText("Reply A")).toBeVisible();
+
+    // Now manually write a running task entry for a hypothetical conv B
+    // to simulate a concurrent conversation
+    await page.evaluate(() => {
+      const raw = localStorage.getItem("chat_running_task_test-vm");
+      const tasks = raw ? JSON.parse(raw) : {};
+      tasks["conv-b-fake"] = "task-b-fake";
+      localStorage.setItem("chat_running_task_test-vm", JSON.stringify(tasks));
+    });
+
+    // Start another message in conv A and complete it
+    await page.getByRole("button", { name: "New Chat" }).click();
+    await sendMessage(page, "Conv-C msg");
+    ctrl.sendSseEvents(sse.text("Reply C", "sess-c"));
+    await expect(page.getByText("Reply C")).toBeVisible();
+
+    // Conv B's entry should still be in localStorage
+    const storedTask = await page.evaluate(() => {
+      const raw = localStorage.getItem("chat_running_task_test-vm");
+      if (!raw) return null;
+      const tasks = JSON.parse(raw);
+      return tasks["conv-b-fake"] ?? null;
+    });
+    expect(storedTask).toBe("task-b-fake");
+  });
 });

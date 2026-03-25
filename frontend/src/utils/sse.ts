@@ -11,6 +11,7 @@ import type {
   SseToolStart,
 } from "../types";
 import { safeJsonParse } from "./safeJson";
+import { removeRunningTask } from "./runningTasks";
 
 /** Lightweight runtime check that an unknown value has the expected string/object fields. */
 function hasFields(
@@ -111,14 +112,18 @@ export function dispatchSseEvent(
     case "done": {
       const event = validatePayload(eventName, payload);
       if (!event) return;
-      localStorage.removeItem(`chat_running_task_${vmId}`);
+      const donePayload = payload as { conversation_id?: string };
+      if (donePayload.conversation_id) {
+        removeRunningTask(vmId, donePayload.conversation_id);
+      }
       pushEvent(event);
       break;
     }
     case "error_event": {
       const event = validatePayload(eventName, payload);
       if (!event) return;
-      localStorage.removeItem(`chat_running_task_${vmId}`);
+      // No conversation_id in error payload — cleanup handled in useSseHandlers
+      // where the conversationId tag is available.
       pushEvent(event);
       break;
     }
@@ -223,14 +228,17 @@ export function attachEventSourceListeners(
     const p = safeParse(e.data);
     const event = p !== undefined ? validatePayload("done", p) : null;
     if (!event) return;
-    localStorage.removeItem(`chat_running_task_${vmId}`);
+    const donePayload = p as { conversation_id?: string };
+    if (donePayload.conversation_id) {
+      removeRunningTask(vmId, donePayload.conversation_id);
+    }
     pushEvent(event);
   });
   add("error_event", (e) => {
     const p = safeParse(e.data);
     const event = p !== undefined ? validatePayload("error_event", p) : null;
     if (!event) return;
-    localStorage.removeItem(`chat_running_task_${vmId}`);
+    // No conversation_id in error payload — cleanup handled in useSseHandlers
     pushEvent(event);
   });
   es.onerror = () => {

@@ -6,7 +6,6 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { safeJsonParse } from "../utils/safeJson";
 import type {
   Conversation,
   FileEntry,
@@ -15,6 +14,7 @@ import type {
   TranscriptMessage,
 } from "../types";
 import { attachEventSourceListeners, readFetchSseStream } from "../utils/sse";
+import { getRunningTasks, clearRunningTasks } from "../utils/runningTasks";
 import { useConversations } from "../hooks/useConversations";
 import { useQuestionStorage } from "../hooks/useQuestionStorage";
 
@@ -227,58 +227,52 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
   const { storeQuestion, clearQuestion, getQuestionsForConversation } =
     useQuestionStorage();
 
-  const esRef = useRef<EventSource | null>(null);
+  const reconnectSourcesRef = useRef<EventSource[]>([]);
   const queryAbortByConversation = useRef<Map<string, AbortController>>(
     new Map(),
   );
 
-  // On mount: check for in-progress task and open reconnect stream
+  // On mount: check for in-progress tasks and open reconnect streams
   useEffect(() => {
-    const storageKey = `chat_running_task_${vmId}`;
-    const saved = localStorage.getItem(storageKey);
-    if (!saved) return;
+    const tasks = getRunningTasks(vmId);
+    const entries = Object.entries(tasks);
 
-    let parsed: { task_id?: string; running_session_id?: string | null };
-    try {
-      parsed = safeJsonParse<{
-        task_id?: string;
-        running_session_id?: string | null;
-      }>(saved);
-    } catch {
-      localStorage.removeItem(storageKey);
-      return;
-    }
+    // Clear storage upfront — valid entries re-register via session_start,
+    // and corrupt/empty values are cleaned up.
+    clearRunningTasks(vmId);
 
-    if (!parsed.task_id) {
-      localStorage.removeItem(storageKey);
-      return;
-    }
+    if (entries.length === 0) return;
 
-    const taskId = parsed.task_id;
-    const conversationId = parsed.running_session_id ?? taskId;
+    const sources: EventSource[] = [];
 
-    pushEvent({
-      type: "reconnecting",
-      payload: { task_id: taskId, conversation_id: conversationId },
-    });
-
-    const taggedPush = (event: SseEvent): void => {
-      pushEvent({ ...event, conversationId } as SseEvent);
-    };
-
-    const url = `/chat-stream/${encodeURIComponent(taskId)}?conversation_id=${encodeURIComponent(conversationId)}`;
-    const es = new EventSource(url);
-    esRef.current = es;
-    attachEventSourceListeners(es, taggedPush, vmId, () => {
-      taggedPush({
-        type: "error_event",
-        payload: { message: "Connection lost" },
+    for (const [conversationId, taskId] of entries) {
+      pushEvent({
+        type: "reconnecting",
+        payload: { task_id: taskId, conversation_id: conversationId },
       });
-    });
+
+      const taggedPush = (event: SseEvent): void => {
+        pushEvent({ ...event, conversationId } as SseEvent);
+      };
+
+      const url = `/chat-stream/${encodeURIComponent(taskId)}?conversation_id=${encodeURIComponent(conversationId)}`;
+      const es = new EventSource(url);
+      sources.push(es);
+      attachEventSourceListeners(es, taggedPush, vmId, () => {
+        taggedPush({
+          type: "error_event",
+          payload: { message: "Connection lost" },
+        });
+      });
+    }
+
+    reconnectSourcesRef.current = sources;
 
     return () => {
-      es.close();
-      esRef.current = null;
+      for (const es of sources) {
+        es.close();
+      }
+      reconnectSourcesRef.current = [];
     };
   }, [vmId, pushEvent]);
 
@@ -445,7 +439,7 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
 
   const resetVmId = useCallback(() => {
     if (vmId) {
-      localStorage.removeItem(`chat_running_task_${vmId}`);
+      clearRunningTasks(vmId);
     }
     setVmId("");
   }, [vmId]);
