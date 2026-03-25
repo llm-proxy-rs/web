@@ -227,6 +227,32 @@ export default function ChatInterface({
     ],
   );
 
+  // Drain refs — declared early so handleSend, handleAnswerQuestion, and
+  // handleSkipQuestion can all reference them before the drain useEffect.
+  const prevRunningIdsRef = useRef<Set<string>>(new Set());
+  const drainingRef = useRef<Set<string>>(new Set());
+  const pendingDrainRef = useRef<Set<string>>(new Set());
+
+  const drainConversation = useCallback(
+    (convId: string) => {
+      if (drainingRef.current.has(convId)) return;
+      const next = shiftQueue(convId);
+      if (next !== undefined) {
+        console.debug(
+          `[queue] drain conv=${convId} text=${JSON.stringify(next.slice(0, 60))}`,
+        );
+        drainingRef.current.add(convId);
+        Promise.resolve().then(() => {
+          drainingRef.current.delete(convId);
+          dispatchMessageTo(convId, next);
+        });
+      } else {
+        console.debug(`[queue] conv=${convId} finished, queue empty`);
+      }
+    },
+    [shiftQueue, dispatchMessageTo],
+  );
+
   const handleSend = useCallback(
     (text: string) => {
       // If the current conversation is running or draining its queue, queue the message
@@ -263,11 +289,28 @@ export default function ChatInterface({
 
   const handleAnswerQuestion = useCallback(
     async (requestId: string, answers: Record<string, string>) => {
-      const taskId =
-        getSessionPendingQuestion(viewConversationId)?.taskId ?? "";
-      setSessionPendingQuestion(viewConversationId, null);
-      clearQuestion(requestId);
-      await sseCtx.answerQuestion(taskId, requestId, answers);
+      const pending = getSessionPendingQuestion(viewConversationId);
+      if (!pending) return;
+      const taskId = pending.taskId;
+      try {
+        await sseCtx.answerQuestion(taskId, requestId, answers);
+        setSessionPendingQuestion(viewConversationId, null);
+        clearQuestion(requestId);
+        // If the conversation finished while the question was pending, drain now
+        if (
+          viewConversationId &&
+          !isConversationRunning(viewConversationId) &&
+          pendingDrainRef.current.has(viewConversationId)
+        ) {
+          pendingDrainRef.current.delete(viewConversationId);
+          drainConversation(viewConversationId);
+        }
+      } catch (err) {
+        console.error(
+          "Failed to send question answer, keeping question visible for retry",
+          err,
+        );
+      }
     },
     [
       sseCtx,
@@ -275,16 +318,35 @@ export default function ChatInterface({
       getSessionPendingQuestion,
       viewConversationId,
       clearQuestion,
+      isConversationRunning,
+      drainConversation,
     ],
   );
 
   const handleSkipQuestion = useCallback(
     async (requestId: string) => {
-      const taskId =
-        getSessionPendingQuestion(viewConversationId)?.taskId ?? "";
-      setSessionPendingQuestion(viewConversationId, null);
-      clearQuestion(requestId);
-      await sseCtx.answerQuestion(taskId, requestId, {});
+      const pending = getSessionPendingQuestion(viewConversationId);
+      if (!pending) return;
+      const taskId = pending.taskId;
+      try {
+        await sseCtx.answerQuestion(taskId, requestId, {});
+        setSessionPendingQuestion(viewConversationId, null);
+        clearQuestion(requestId);
+        // If the conversation finished while the question was pending, drain now
+        if (
+          viewConversationId &&
+          !isConversationRunning(viewConversationId) &&
+          pendingDrainRef.current.has(viewConversationId)
+        ) {
+          pendingDrainRef.current.delete(viewConversationId);
+          drainConversation(viewConversationId);
+        }
+      } catch (err) {
+        console.error(
+          "Failed to skip question, keeping question visible for retry",
+          err,
+        );
+      }
     },
     [
       sseCtx,
@@ -292,6 +354,8 @@ export default function ChatInterface({
       getSessionPendingQuestion,
       viewConversationId,
       clearQuestion,
+      isConversationRunning,
+      drainConversation,
     ],
   );
 
@@ -305,8 +369,8 @@ export default function ChatInterface({
   // Drain queued messages when any conversation stops running.
   // Compares the current runningConversationIds with the previous snapshot
   // to find conversations that just finished, then dispatches their next queued message.
-  const prevRunningIdsRef = useRef<Set<string>>(new Set());
-  const drainingRef = useRef<Set<string>>(new Set());
+  // If a conversation has a pending question when it finishes, drain is deferred
+  // until the question is answered (see handleAnswerQuestion / handleSkipQuestion).
   useEffect(() => {
     const prev = prevRunningIdsRef.current;
     prevRunningIdsRef.current = new Set(runningConversationIds);
@@ -315,24 +379,18 @@ export default function ChatInterface({
         !runningConversationIds.has(convId) &&
         !drainingRef.current.has(convId)
       ) {
-        const next = shiftQueue(convId);
-        if (next !== undefined) {
+        if (getSessionPendingQuestion(convId)) {
+          // Defer drain until the question is answered
           console.debug(
-            `[queue] drain conv=${convId} text=${JSON.stringify(next.slice(0, 60))}`,
+            `[queue] conv=${convId} finished with pending question, deferring drain`,
           );
-          drainingRef.current.add(convId);
-          // Use microtask to let the current state update flush before dispatching
-          // the next message, avoiding React batching the remove + add into a no-op.
-          Promise.resolve().then(() => {
-            drainingRef.current.delete(convId);
-            dispatchMessageTo(convId, next);
-          });
+          pendingDrainRef.current.add(convId);
         } else {
-          console.debug(`[queue] conv=${convId} finished, queue empty`);
+          drainConversation(convId);
         }
       }
     }
-  }, [runningConversationIds, shiftQueue, dispatchMessageTo]);
+  }, [runningConversationIds, drainConversation, getSessionPendingQuestion]);
 
   // Staleness watchdog: if a running conversation hasn't received any SSE event
   // (including server heartbeats sent every 60s) for 90s, assume the connection
@@ -344,6 +402,12 @@ export default function ChatInterface({
     const interval = setInterval(() => {
       const now = Date.now();
       for (const convId of runningConversationIds) {
+        // Never mark a conversation stale while it has a pending question —
+        // the agent is intentionally waiting for the user's answer.
+        if (getSessionPendingQuestion(convId)) {
+          lastActivityByConversation.current.set(convId, now);
+          continue;
+        }
         const lastActivity = lastActivityByConversation.current.get(convId);
         if (lastActivity !== undefined && now - lastActivity > STALE_MS) {
           console.warn(
@@ -358,6 +422,7 @@ export default function ChatInterface({
     runningConversationIds,
     removeRunningConversation,
     lastActivityByConversation,
+    getSessionPendingQuestion,
   ]);
 
   const handleRemoveQueued = useCallback(

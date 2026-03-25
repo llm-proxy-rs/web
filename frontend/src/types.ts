@@ -165,6 +165,7 @@ export type SseEvent =
   | { type: "tool_result"; payload: SseToolResult; conversationId?: string }
   | { type: "done"; payload: SseDone; conversationId?: string }
   | { type: "error_event"; payload: SseErrorEvent; conversationId?: string }
+  | { type: "heartbeat"; conversationId?: string }
   | {
       type: "reconnecting";
       payload: { task_id: string; conversation_id: string };

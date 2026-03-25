@@ -144,6 +144,13 @@ export async function readFetchSseStream(
       let streamEnded = false;
       for (const part of parts) {
         if (!part.trim()) continue;
+        // SSE comment lines (e.g. ": keep-alive") are server heartbeats.
+        // Push a heartbeat event so the client can track activity and
+        // prevent the staleness watchdog from falsely killing the stream.
+        if (part.trim().startsWith(":")) {
+          pushEvent({ type: "heartbeat" });
+          continue;
+        }
         const block = parseSseBlock(part);
         if (block) {
           dispatchSseEvent(block.eventName, block.data, pushEvent, vmId);

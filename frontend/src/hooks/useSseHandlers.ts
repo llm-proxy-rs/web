@@ -456,7 +456,9 @@ export function useSseHandlers(
           }
           doneState.taskId = null;
           removeRunningConversation(conversation_id);
-          setSessionPendingQuestion(conversation_id, null);
+          // Do not clear a pending question on done — the question panel stays
+          // visible until the user explicitly answers or skips.  The answer
+          // handlers (handleAnswerQuestion / handleSkipQuestion) own that cleanup.
           // Seal thinking
           if (doneState.thinkingMsgId) {
             const msgId = doneState.thinkingMsgId;
@@ -533,6 +535,10 @@ export function useSseHandlers(
           streamStateRef.current.delete(abortedId);
           break;
         }
+
+        case "heartbeat":
+          // Activity touch already happened at the top of handleEvent.
+          break;
 
         case "reconnecting": {
           const { task_id, conversation_id } = event.payload;
