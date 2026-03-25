@@ -241,4 +241,65 @@ test.describe("reconnect", () => {
       page.locator('textarea[placeholder="Message Claude…"]'),
     ).toBeVisible();
   });
+
+  test("RC-07 backwards compat: old single-task format still reconnects", async ({
+    page,
+  }) => {
+    // Old format: { task_id, running_session_id }
+    await page.addInitScript(
+      (args: { vmId: string; taskId: string; convId: string }) => {
+        localStorage.setItem(
+          `chat_running_task_${args.vmId}`,
+          JSON.stringify({
+            task_id: args.taskId,
+            running_session_id: args.convId,
+          }),
+        );
+      },
+      { vmId: VM_ID, taskId: "task-rc07", convId: "conv-rc07" },
+    );
+
+    const streamReqPromise = page.waitForRequest(
+      (r) => r.url().includes("chat-stream/task-rc07") && r.method() === "GET",
+    );
+
+    const ctrl = await setupApp(page, {});
+
+    ctrl.sendSseEvents([
+      { event: "done", data: { session_id: null, task_id: "task-rc07" } },
+    ]);
+
+    const streamReq = await streamReqPromise;
+    const url = new URL(streamReq.url());
+    expect(url.searchParams.get("conversation_id")).toBe("conv-rc07");
+  });
+
+  test("RC-08 new format: multi-conversation map is read on reconnect", async ({
+    page,
+  }) => {
+    // New format: { [conversationId]: taskId }
+    await page.addInitScript(
+      (args: { vmId: string }) => {
+        localStorage.setItem(
+          `chat_running_task_${args.vmId}`,
+          JSON.stringify({ "conv-rc08": "task-rc08" }),
+        );
+      },
+      { vmId: VM_ID },
+    );
+
+    const streamReqPromise = page.waitForRequest(
+      (r) => r.url().includes("chat-stream/task-rc08") && r.method() === "GET",
+    );
+
+    const ctrl = await setupApp(page, {});
+
+    ctrl.sendSseEvents([
+      { event: "done", data: { session_id: null, task_id: "task-rc08" } },
+    ]);
+
+    const streamReq = await streamReqPromise;
+    const url = new URL(streamReq.url());
+    expect(url.searchParams.get("conversation_id")).toBe("conv-rc08");
+  });
 });
