@@ -150,7 +150,14 @@ async fn stream_ssh_channel(
                 match msg {
                     Some(ChannelMsg::Data { ref data }) => {
                         info!("received stdout from agent");
+                        let is_terminal = data_contains_terminal_event(data);
                         if !send_sse(tx, Bytes::copy_from_slice(data)).await {
+                            break;
+                        }
+                        // Stop streaming after forwarding done/error — the task
+                        // is finished and the client doesn't need more data.
+                        if is_terminal {
+                            info!("terminal event forwarded, closing stream");
                             break;
                         }
                     }
@@ -183,4 +190,14 @@ async fn stream_ssh_channel(
     }
     info!("agent stream ended");
     Ok(())
+}
+
+/// Check if the raw SSE data contains a `done` or `error_event` line,
+/// indicating the task is finished and the stream should close.
+fn data_contains_terminal_event(data: &[u8]) -> bool {
+    data.windows(b"event: done\n".len())
+        .any(|w| w == b"event: done\n")
+        || data
+            .windows(b"event: error_event\n".len())
+            .any(|w| w == b"event: error_event\n")
 }

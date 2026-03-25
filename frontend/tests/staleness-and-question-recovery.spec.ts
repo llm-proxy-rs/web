@@ -205,6 +205,10 @@ test.describe("staleness & question recovery", () => {
     await expect.poll(() => ctrl.allChatBodies().length).toBe(2);
     expect(ctrl.allChatBodies()[1].content).toBe("Second");
 
+    // Wait for React to fully settle (addRunningConversation state update +
+    // stale watchdog useEffect re-setup) before advancing time again.
+    await page.waitForFunction(() => true);
+
     // Fast-forward again → second consecutive stale
     await page.clock.fastForward(105_000);
 
@@ -228,15 +232,23 @@ test.describe("staleness & question recovery", () => {
     await expect(page.getByText("Queued messages (1)")).toBeVisible();
 
     // Two consecutive stales → drain stops
+    // First stale: drain retries "Second" (POST #2)
     await page.clock.fastForward(105_000);
     await expect.poll(() => ctrl.allChatBodies().length).toBe(2);
+    // Second stale: drain skipped
     await page.clock.fastForward(105_000);
-    // Drain skipped — "Second" was consumed by the retry, queue empty now
-    // But the retry POST also hung, so the conversation is idle.
 
-    // User manually sends a new message — this resets the stale counter
+    // User manually sends a new message — this resets the stale counter.
+    // The conversation is idle (removed from running by stale watchdog), so
+    // handleSend dispatches directly (POST #3).
     await sendMessage(page, "Manual retry");
-    // Deliver a successful response so the conversation completes normally
+    await expect.poll(() => ctrl.allChatBodies().length).toBe(3);
+
+    // The mock has 3 pending waiters (POST #1, #2 aborted but mock doesn't
+    // know; POST #3 is the real one).  Flush the two stale waiters first.
+    ctrl.sendSseEvents(sse.text("ignored1", "sess-stale1"));
+    ctrl.sendSseEvents(sse.text("ignored2", "sess-stale2"));
+    // Now deliver the real response for the manual retry
     ctrl.sendSseEvents(sse.text("Got it", "sess-retry"));
     await expect(page.getByText("Got it")).toBeVisible();
 
