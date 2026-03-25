@@ -641,6 +641,14 @@ export async function setupApp(
     });
   });
 
+  // Track aborted POST /chat requests so the mock can skip their stale waiters.
+  const abortedChatRequests = new WeakSet<object>();
+  page.on("requestfailed", (req) => {
+    if (req.method() === "POST" && req.url().includes("/chat")) {
+      abortedChatRequests.add(req);
+    }
+  });
+
   // ── Chat message endpoint — POST /chat returns SSE stream ────────────────
   await page.route("**/chat", async (route) => {
     if (route.request().method() !== "POST") return route.continue();
@@ -665,6 +673,15 @@ export async function setupApp(
     const conversationId = body.conversation_id;
 
     const events = await waitForSseEvents(conversationId);
+
+    // If this request was aborted by the client (e.g. stale watchdog abort),
+    // re-queue the SSE events so the next live POST /chat for this conversation
+    // can pick them up instead of losing them.
+    if (abortedChatRequests.has(route.request())) {
+      deliverSseEvents(events, conversationId);
+      return;
+    }
+
     const injectedEvents = injectConversationId(events, conversationId);
 
     // Prepend task_created event so the frontend learns the task_id
@@ -682,11 +699,18 @@ export async function setupApp(
     if (chatResponseToken !== null) {
       headers["x-csrf-token"] = chatResponseToken;
     }
-    await route.fulfill({
-      status: 200,
-      headers,
-      body: taskCreatedLine + buildSseBody(injectedEvents),
-    });
+    try {
+      await route.fulfill({
+        status: 200,
+        headers,
+        body: taskCreatedLine + buildSseBody(injectedEvents),
+      });
+    } catch {
+      // route.fulfill can throw if the request was aborted after waitForSseEvents
+      // resolved but before we checked abortedChatRequests (race). Re-deliver the
+      // events so the next live request for this conversation can handle them.
+      deliverSseEvents(events, conversationId);
+    }
   });
 
   // ── Load the app ──────────────────────────────────────────────────────────

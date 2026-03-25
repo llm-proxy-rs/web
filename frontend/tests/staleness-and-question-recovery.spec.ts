@@ -182,4 +182,66 @@ test.describe("staleness & question recovery", () => {
     expect(bodies[0].content).toBe("First");
     expect(bodies[1].content).toBe("Second");
   });
+
+  test("UF-99 stale drain retries once then stops on consecutive stale", async ({
+    page,
+  }) => {
+    await page.clock.install();
+    const ctrl = await setupApp(page, {});
+
+    // Send first message (POST hangs — no SSE events delivered)
+    await sendMessage(page, "First");
+    // Queue two more messages while streaming
+    await sendMessage(page, "Second");
+    await sendMessage(page, "Third");
+    await expect(page.getByText("Queued messages (2)")).toBeVisible();
+
+    expect(ctrl.allChatBodies().length).toBe(1);
+
+    // Fast-forward past stale threshold (90s) + one check interval (15s)
+    await page.clock.fastForward(105_000);
+
+    // First stale → drain retries: "Second" should be dispatched
+    await expect.poll(() => ctrl.allChatBodies().length).toBe(2);
+    expect(ctrl.allChatBodies()[1].content).toBe("Second");
+
+    // Fast-forward again → second consecutive stale
+    await page.clock.fastForward(105_000);
+
+    // Drain should be SKIPPED — no third POST even after extra time
+    await page.clock.fastForward(30_000);
+    expect(ctrl.allChatBodies().length).toBe(2);
+
+    // "Third" should still be in the queue (not lost)
+    await expect(page.getByText("Queued messages (1)")).toBeVisible();
+  });
+
+  test("UF-100 user send resets stale counter so queue resumes", async ({
+    page,
+  }) => {
+    await page.clock.install();
+    const ctrl = await setupApp(page, {});
+
+    // Send first message (hangs) and queue a second
+    await sendMessage(page, "First");
+    await sendMessage(page, "Second");
+    await expect(page.getByText("Queued messages (1)")).toBeVisible();
+
+    // Two consecutive stales → drain stops
+    await page.clock.fastForward(105_000);
+    await expect.poll(() => ctrl.allChatBodies().length).toBe(2);
+    await page.clock.fastForward(105_000);
+    // Drain skipped — "Second" was consumed by the retry, queue empty now
+    // But the retry POST also hung, so the conversation is idle.
+
+    // User manually sends a new message — this resets the stale counter
+    await sendMessage(page, "Manual retry");
+    // Deliver a successful response so the conversation completes normally
+    ctrl.sendSseEvents(sse.text("Got it", "sess-retry"));
+    await expect(page.getByText("Got it")).toBeVisible();
+
+    // Verify the manual send went through
+    const bodies = ctrl.allChatBodies();
+    expect(bodies[bodies.length - 1].content).toBe("Manual retry");
+  });
 });
