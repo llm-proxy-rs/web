@@ -10,6 +10,12 @@
  * UF-86  Queue clears on New Chat — switching to new chat discards the queue
  * UF-87  Remove a queued message via X button — clicking X removes item from drawer
  * UF-88  Clear all queued messages — "Clear all" button empties the queue
+ * UF-89  Queue persists across conversation switches
+ * UF-90  Queue drains to correct conversation
+ * UF-91  New chat works after queue drains
+ * UF-92  New chat during in-flight message
+ * UF-93  Queue drains after error event — error cleans up running state so queue continues
+ * UF-94  Rapid send during drain — draining guard prevents double dispatch
  */
 import { test, expect } from "@playwright/test";
 import { setupApp, sendMessage, sse } from "./helpers/setup";
@@ -303,6 +309,64 @@ test.describe("message queue", () => {
     expect(bodies[2].content).toBe("Fresh message");
     // New chat should have a different conversation_id
     expect(bodies[2].conversation_id).not.toBe(bodies[0].conversation_id);
+  });
+
+  test("UF-93 queue drains after error event", async ({ page }) => {
+    const ctrl = await setupApp(page, {});
+
+    // Send first message and queue a second
+    await sendMessage(page, "First");
+    await sendMessage(page, "Second");
+    await expect(page.getByText("Queued messages (1)")).toBeVisible();
+
+    // First stream ends with an error instead of done
+    ctrl.sendSseEvents(sse.error("Something went wrong"));
+
+    // Error message should appear
+    await expect(page.getByText("Something went wrong")).toBeVisible();
+
+    // The queued message should still auto-dispatch after the error
+    ctrl.sendSseEvents(sse.text("Response to second", "sess-2"));
+    await expect(page.getByText("Response to second")).toBeVisible();
+
+    // Both POSTs should have fired
+    const bodies = ctrl.allChatBodies();
+    expect(bodies.length).toBe(2);
+    expect(bodies[0].content).toBe("First");
+    expect(bodies[1].content).toBe("Second");
+  });
+
+  test("UF-94 rapid send during drain does not cause double dispatch", async ({
+    page,
+  }) => {
+    const ctrl = await setupApp(page, {});
+
+    // Send first message and queue a second
+    await sendMessage(page, "First");
+    await sendMessage(page, "Second");
+    await expect(page.getByText("Queued messages (1)")).toBeVisible();
+
+    // Complete the first stream — "Second" should auto-dispatch
+    ctrl.sendSseEvents(sse.text("R1", "sess-1"));
+    await expect(page.getByText("R1")).toBeVisible();
+
+    // Quickly send another message — it should be queued, not dispatched directly
+    await sendMessage(page, "Third");
+
+    // Complete "Second" stream
+    ctrl.sendSseEvents(sse.text("R2", "sess-2"));
+    await expect(page.getByText("R2")).toBeVisible();
+
+    // Complete "Third" stream
+    ctrl.sendSseEvents(sse.text("R3", "sess-3"));
+    await expect(page.getByText("R3")).toBeVisible();
+
+    // Verify all three sent sequentially — no duplicates
+    const bodies = ctrl.allChatBodies();
+    expect(bodies.length).toBe(3);
+    expect(bodies[0].content).toBe("First");
+    expect(bodies[1].content).toBe("Second");
+    expect(bodies[2].content).toBe("Third");
   });
 
   test("UF-92 new chat works while a queued message is still in-flight", async ({

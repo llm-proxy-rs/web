@@ -269,7 +269,12 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
     const url = `/chat-stream/${encodeURIComponent(taskId)}?conversation_id=${encodeURIComponent(conversationId)}`;
     const es = new EventSource(url);
     esRef.current = es;
-    attachEventSourceListeners(es, taggedPush, vmId);
+    attachEventSourceListeners(es, taggedPush, vmId, () => {
+      taggedPush({
+        type: "error_event",
+        payload: { message: "Connection lost" },
+      });
+    });
 
     return () => {
       es.close();
@@ -287,7 +292,13 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
       // Abort any previous in-flight stream for the SAME conversation so the
       // server/agent connection is released before we open a new one.
       // Different conversations are left alone (the agent handles parallel sessions).
-      queryAbortByConversation.current.get(conversationId)?.abort();
+      const prev = queryAbortByConversation.current.get(conversationId);
+      if (prev) {
+        console.warn(
+          `[queue] aborting previous in-flight query for conv=${conversationId}`,
+        );
+        prev.abort();
+      }
 
       const taggedPush = (event: SseEvent): void => {
         pushEvent({ ...event, conversationId } as SseEvent);
@@ -319,7 +330,12 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
       };
       executeStream()
         .catch((err: unknown) => {
-          if (err instanceof DOMException && err.name === "AbortError") return;
+          if (err instanceof DOMException && err.name === "AbortError") {
+            console.warn(
+              `[queue] query aborted for conv=${conversationId} (superseded by new query)`,
+            );
+            return;
+          }
           taggedPush({
             type: "error_event",
             payload: { message: String(err) },
