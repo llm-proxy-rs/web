@@ -42,7 +42,7 @@ interface SseContextValue {
     sessionId?: string,
     workDir?: string,
   ) => void;
-  abortQuery: () => void;
+  abortQuery: (conversationId?: string) => void;
   sendStop: (taskId: string) => Promise<void>;
   answerQuestion: (
     taskId: string,
@@ -228,7 +228,9 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
     useQuestionStorage();
 
   const esRef = useRef<EventSource | null>(null);
-  const queryAbortRef = useRef<AbortController | null>(null);
+  const queryAbortByConversation = useRef<Map<string, AbortController>>(
+    new Map(),
+  );
 
   // On mount: check for in-progress task and open reconnect stream
   useEffect(() => {
@@ -282,11 +284,16 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
       sessionId?: string,
       workDir?: string,
     ) => {
+      // Abort any previous in-flight stream for the SAME conversation so the
+      // server/agent connection is released before we open a new one.
+      // Different conversations are left alone (the agent handles parallel sessions).
+      queryAbortByConversation.current.get(conversationId)?.abort();
+
       const taggedPush = (event: SseEvent): void => {
         pushEvent({ ...event, conversationId } as SseEvent);
       };
       const abortController = new AbortController();
-      queryAbortRef.current = abortController;
+      queryAbortByConversation.current.set(conversationId, abortController);
       const executeStream = async () => {
         const res = await csrfFetch("/chat", {
           method: "POST",
@@ -319,17 +326,28 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
           });
         })
         .finally(() => {
-          if (queryAbortRef.current === abortController) {
-            queryAbortRef.current = null;
+          if (
+            queryAbortByConversation.current.get(conversationId) ===
+            abortController
+          ) {
+            queryAbortByConversation.current.delete(conversationId);
           }
         });
     },
     [vmId, pushEvent, csrfFetch],
   );
 
-  const abortQuery = useCallback(() => {
-    queryAbortRef.current?.abort();
-    queryAbortRef.current = null;
+  const abortQuery = useCallback((conversationId?: string) => {
+    if (conversationId) {
+      queryAbortByConversation.current.get(conversationId)?.abort();
+      queryAbortByConversation.current.delete(conversationId);
+    } else {
+      // Fallback: abort all in-flight queries
+      for (const ctrl of queryAbortByConversation.current.values()) {
+        ctrl.abort();
+      }
+      queryAbortByConversation.current.clear();
+    }
   }, []);
 
   const post = useCallback(
