@@ -166,14 +166,16 @@ async fn prepare_vm_rootfs(
 ) -> Result<()> {
     info!("copying rootfs");
     copy_sparse(source_rootfs, rootfs_copy).await?;
+    // Set permissions before chown — after chown the file is owned by the jailer
+    // user and chmod would require CAP_FOWNER which the server doesn't have.
+    std::fs::set_permissions(rootfs_copy, Permissions::from_mode(0o644))
+        .context("failed to set rootfs permissions")?;
     nix::unistd::chown(
         rootfs_copy,
         Some(Uid::from_raw(jailer.uid)),
         Some(Gid::from_raw(jailer.gid)),
     )
     .context("failed to chown rootfs copy for jailer")?;
-    std::fs::set_permissions(rootfs_copy, Permissions::from_mode(0o644))
-        .context("failed to set rootfs permissions")?;
     Ok(())
 }
 
