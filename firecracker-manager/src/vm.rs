@@ -7,7 +7,9 @@ use nix::{
 };
 use std::{
     collections::BTreeSet,
+    fs::Permissions,
     net::Ipv4Addr,
+    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     sync::Mutex,
     time::Duration,
@@ -94,7 +96,11 @@ impl Vm {
         stop_vm(&self.socket_path(), self.pid).await;
         let rootfs_copy = self.rootfs_copy();
         if rename(&rootfs_copy, dest).await.is_err() {
-            copy_sparse(&rootfs_copy, dest)
+            // Use in-process copy so we inherit the server's file capabilities
+            // (CAP_DAC_READ_SEARCH, CAP_DAC_OVERRIDE). Spawned child processes
+            // like `cp` do not inherit these and will get Permission Denied on
+            // jailer-owned files.
+            tokio::fs::copy(&rootfs_copy, dest)
                 .await
                 .with_context(|| format!("failed to copy rootfs to {}", dest.display()))?;
         }
@@ -160,6 +166,10 @@ async fn prepare_vm_rootfs(
 ) -> Result<()> {
     info!("copying rootfs");
     copy_sparse(source_rootfs, rootfs_copy).await?;
+    // Set permissions before chown — after chown the file is owned by the jailer
+    // user and chmod would require CAP_FOWNER which the server doesn't have.
+    std::fs::set_permissions(rootfs_copy, Permissions::from_mode(0o644))
+        .context("failed to set rootfs permissions")?;
     nix::unistd::chown(
         rootfs_copy,
         Some(Uid::from_raw(jailer.uid)),
