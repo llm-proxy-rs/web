@@ -29,7 +29,7 @@
     "@fontsource/ibm-plex-sans": "^5.2.8",
     "@tailwindcss/typography": "^0.5.19",
     "highlight.js": "^11.11.1",
-    "lucide-react": "^1.6.0",
+    "lucide-react": "^1.7.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-markdown": "^10",
