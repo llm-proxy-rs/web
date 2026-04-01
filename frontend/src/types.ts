@@ -6,6 +6,12 @@ export interface Conversation {
   createdAt: number;
 }
 
+export interface McpServer {
+  name: string;
+  url: string;
+  headers?: Record<string, string>;
+}
+
 export interface ChatSession {
   session_id: string;
   created_at: string;

@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -13,7 +13,6 @@ use std::{
     time::Instant,
 };
 use store::PgPool;
-use tokio::sync::Mutex as AsyncMutex;
 use tracing::error;
 use uuid::Uuid;
 use vm_lifecycle::{VmBuildConfig, VmRegistry};
@@ -67,8 +66,6 @@ pub(crate) struct AppConfig {
     pub(crate) gateway_tls_accept_invalid_certs: bool,
     #[serde(default)]
     pub(crate) gateway_identity_provider: String,
-    #[serde(default = "default_user_rootfs_dir")]
-    pub(crate) user_rootfs_dir: PathBuf,
     #[serde(default = "default_upload_dir")]
     pub(crate) upload_dir: PathBuf,
     #[serde(default = "default_database_url")]
@@ -131,9 +128,6 @@ fn default_vm_host_key_path() -> PathBuf {
 fn default_cognito_redirect_uri() -> String {
     "http://localhost:3000/callback".to_string()
 }
-fn default_user_rootfs_dir() -> PathBuf {
-    PathBuf::from("/home/ubuntu/fc-users")
-}
 fn default_upload_dir() -> PathBuf {
     PathBuf::from("/home/ubuntu")
 }
@@ -184,8 +178,10 @@ pub(crate) fn load_config() -> Result<AppConfig> {
     let app_config: AppConfig = Config::builder()
         .add_source(File::with_name("config").required(false))
         .add_source(Environment::default())
-        .build()?
-        .try_deserialize()?;
+        .build()
+        .context("failed to build config")?
+        .try_deserialize()
+        .context("failed to deserialize config")?;
     tracing::info!("config loaded");
     Ok(app_config)
 }
@@ -212,7 +208,6 @@ pub(crate) struct AppState {
     pub(crate) db: PgPool,
     pub(crate) vms: VmRegistry,
     pub(crate) provisioning_users: Arc<Mutex<HashSet<Uuid>>>,
-    pub(crate) rootfs_lock: Arc<AsyncMutex<()>>,
     pub(crate) static_assets: Arc<StaticAssets>,
 }
 
@@ -223,7 +218,6 @@ impl AppState {
             db: pg_pool,
             vms: Arc::new(Mutex::new(HashMap::new())),
             provisioning_users: Arc::new(Mutex::new(HashSet::new())),
-            rootfs_lock: Arc::new(AsyncMutex::new(())),
             static_assets: Arc::new(static_assets),
         }
     }
@@ -274,4 +268,45 @@ pub(crate) fn find_user_vm(vms: &VmRegistry, user_id: Uuid) -> Result<Option<Use
             vm_id: id.clone(),
             guest_ip: e.vm.guest_ip(),
         }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn app_config_defaults_from_empty_json() {
+        let config: AppConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(config.port, 3000);
+        assert_eq!(config.vm_vcpu_count, 2);
+        assert_eq!(config.vm_mem_size_mib, 4096);
+        assert_eq!(config.vm_max_count, 20);
+        assert!(config.use_iam_creds);
+    }
+
+    #[test]
+    fn app_config_default_paths() {
+        let config: AppConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(config.kernel_path, PathBuf::from("/var/lib/fc/vmlinux"));
+        assert_eq!(config.rootfs_path, PathBuf::from("/var/lib/fc/rootfs.ext4"));
+        assert_eq!(config.ssh_user, "ubuntu");
+        assert_eq!(config.database_url, "postgres://localhost/web");
+        assert_eq!(config.iam_role_name, "fc-role");
+        assert_eq!(config.jailer_chroot_base, PathBuf::from("/srv/jailer"));
+    }
+
+    #[test]
+    fn to_vm_build_config_copies_fields() {
+        let config: AppConfig = serde_json::from_str("{}").unwrap();
+        let vm_config = config.to_vm_build_config();
+        assert_eq!(vm_config.kernel_path, config.kernel_path);
+        assert_eq!(vm_config.net_helper_path, config.net_helper_path);
+        assert_eq!(vm_config.vcpu_count, config.vm_vcpu_count);
+        assert_eq!(vm_config.mem_size_mib, config.vm_mem_size_mib);
+        assert_eq!(vm_config.jailer_path, config.jailer_path);
+        assert_eq!(vm_config.firecracker_path, config.firecracker_path);
+        assert_eq!(vm_config.jailer_uid, config.jailer_uid);
+        assert_eq!(vm_config.jailer_gid, config.jailer_gid);
+        assert_eq!(vm_config.jailer_chroot_base, config.jailer_chroot_base);
+    }
 }

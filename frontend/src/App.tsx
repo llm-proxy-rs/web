@@ -67,6 +67,7 @@ function AppContent() {
   const [showFilesPanel, setShowFilesPanel] = useState(false);
   const terminalRef = useRef<TerminalHandle>(null);
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
+  const [mcpOAuthResult, setMcpOAuthResult] = useState<string | null>(null);
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     const saved = localStorage.getItem("ui-theme");
     return saved ? saved === "dark" : true;
@@ -75,6 +76,33 @@ function AppContent() {
   React.useEffect(() => {
     sessionStorage.setItem("active-tab", activeTab);
   }, [activeTab]);
+
+  // Handle MCP OAuth callback result via BroadcastChannel
+  React.useEffect(() => {
+    const messages: Record<string, string> = {
+      state_mismatch: "OAuth failed: state mismatch. Please try again.",
+      token_exchange: "OAuth failed: token exchange failed.",
+      write_failed: "OAuth failed: could not write config to VM.",
+    };
+
+    const ch = new BroadcastChannel("mcp_oauth");
+    ch.onmessage = (event: MessageEvent) => {
+      if (event.data?.type !== "mcp_oauth") return;
+      const { result, reason } = event.data;
+      if (result === "success") {
+        setMcpOAuthResult("MCP server connected successfully via OAuth.");
+        setShowSettings(true);
+      } else {
+        setMcpOAuthResult(
+          reason
+            ? messages[reason] || `OAuth failed: ${reason}`
+            : "OAuth failed. Please try again.",
+        );
+      }
+    };
+
+    return () => ch.close();
+  }, []);
 
   React.useEffect(() => {
     if (darkMode) {
@@ -206,6 +234,26 @@ function AppContent() {
             </div>
           </main>
         </>
+      )}
+
+      {mcpOAuthResult && (
+        <div
+          className={`fixed top-4 right-4 z-[60] max-w-sm rounded-lg border px-4 py-3 shadow-lg ${
+            mcpOAuthResult.includes("successfully")
+              ? "border-emerald-500/30 bg-emerald-950/90 text-emerald-200"
+              : "border-red-500/30 bg-red-950/90 text-red-200"
+          }`}
+        >
+          <div className="flex items-start justify-between gap-2">
+            <p className="text-sm">{mcpOAuthResult}</p>
+            <button
+              onClick={() => setMcpOAuthResult(null)}
+              className="mt-0.5 text-xs opacity-60 hover:opacity-100"
+            >
+              &times;
+            </button>
+          </div>
+        </div>
       )}
 
       {showSettings && (

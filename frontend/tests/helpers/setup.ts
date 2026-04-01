@@ -312,6 +312,29 @@ export interface AppController {
   lastDeleteCsrfToken(): string | null;
   /** Whether a renew-gateway-key request was received. */
   renewGatewayKeyRequested(): boolean;
+  /** Body of the most recent POST /api/mcp-servers, or null. */
+  lastMcpAdd(): {
+    name: string;
+    url: string;
+    headers?: Record<string, string>;
+  } | null;
+  /** Name from the most recent DELETE /api/mcp-servers/:name, or null. */
+  lastMcpDelete(): string | null;
+  /** Body of the most recent POST /api/mcp-servers/oauth-register, or null. */
+  lastMcpRegister(): {
+    registration_endpoint: string;
+    client_name: string;
+    redirect_uri: string;
+    scope?: string;
+    token_endpoint_auth_methods_supported?: string[];
+  } | null;
+}
+
+export interface McpServerEntry {
+  name: string;
+  type: string;
+  url: string;
+  headers?: Record<string, string>;
 }
 
 export interface SetupOpts {
@@ -336,6 +359,28 @@ export interface SetupOpts {
   renewGatewayKeyError?: boolean;
   /** When set, POST /api/renew-gateway-key returns a redirect URL. */
   renewGatewayKeyRedirect?: string;
+  /** Initial MCP servers returned by GET /api/mcp-servers. */
+  mcpServers?: McpServerEntry[];
+  /** When true, POST /api/mcp-servers returns a 500 error. */
+  mcpAddError?: boolean;
+  /** OAuth discover response for GET /api/mcp-servers/oauth-discover. null = no OAuth. */
+  mcpOAuthMetadata?: {
+    authorization_endpoint: string;
+    token_endpoint: string;
+    registration_endpoint?: string;
+    scopes_supported?: string[];
+    code_challenge_methods_supported?: string[];
+    grant_types_supported?: string[];
+    token_endpoint_auth_methods_supported?: string[];
+  } | null;
+  /** Client ID returned by POST /api/mcp-servers/oauth-register. */
+  mcpOAuthClientId?: string;
+  /** Client secret returned by POST /api/mcp-servers/oauth-register. */
+  mcpOAuthClientSecret?: string;
+  /** When true, POST /api/mcp-servers/oauth-register returns 403. */
+  mcpOAuthRegError?: boolean;
+  /** Redirect URL returned by POST /api/mcp-servers/oauth-start. */
+  mcpOAuthRedirect?: string;
   /** Override the vmId in app-config. Defaults to VM_ID ("test-vm"). Set to "" to test provisioning flow. */
   vmId?: string;
 }
@@ -372,6 +417,20 @@ export async function setupApp(
   let settingsResponseToken: string | null = null;
   let lastDeleteCsrfTokenValue: string | null = null;
   let renewGatewayKeyReceived = false;
+  let mcpServers: McpServerEntry[] = opts.mcpServers ?? [];
+  let lastMcpAddBody: {
+    name: string;
+    url: string;
+    headers?: Record<string, string>;
+  } | null = null;
+  let lastMcpDeleteName: string | null = null;
+  let lastMcpRegisterBody: {
+    registration_endpoint: string;
+    client_name: string;
+    redirect_uri: string;
+    scope?: string;
+    token_endpoint_auth_methods_supported?: string[];
+  } | null = null;
 
   // SSE event delivery — shared between POST /chat and GET /chat-stream/**
   //
@@ -584,6 +643,124 @@ export async function setupApp(
     }
   });
 
+  // ── MCP OAuth endpoints ──────────────────────────────────────────────
+  await page.route("**/api/mcp-servers/oauth-discover**", async (route) => {
+    if (opts.mcpOAuthMetadata) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ oauth: true, metadata: opts.mcpOAuthMetadata }),
+      });
+    } else {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ oauth: false, metadata: null }),
+      });
+    }
+  });
+  await page.route("**/api/mcp-servers/oauth-register", async (route) => {
+    if (opts.mcpOAuthRegError) {
+      await route.fulfill({
+        status: 403,
+        body: "Forbidden",
+      });
+      return;
+    }
+    lastMcpRegisterBody = route.request().postDataJSON() as {
+      registration_endpoint: string;
+      client_name: string;
+      redirect_uri: string;
+      scope?: string;
+      token_endpoint_auth_methods_supported?: string[];
+    };
+    if (!opts.mcpOAuthClientId) {
+      // No client ID configured — simulate a server that doesn't support DCR
+      await route.fulfill({
+        status: 400,
+        body: "Dynamic registration not supported",
+      });
+      return;
+    }
+    const responseBody: Record<string, string> = {
+      client_id: opts.mcpOAuthClientId,
+    };
+    if (opts.mcpOAuthClientSecret) {
+      responseBody.client_secret = opts.mcpOAuthClientSecret;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(responseBody),
+    });
+  });
+  await page.route("**/api/mcp-servers/oauth-start", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        redirect:
+          opts.mcpOAuthRedirect ?? "https://oauth.example.com/authorize?mock=1",
+      }),
+    });
+  });
+
+  // ── MCP servers endpoints ─────────────────────────────────────────────
+  await page.route("**/api/mcp-servers/**", async (route) => {
+    // DELETE /api/mcp-servers/:name
+    if (route.request().method() === "DELETE") {
+      const url = new URL(route.request().url());
+      const parts = url.pathname.split("/");
+      lastMcpDeleteName = decodeURIComponent(parts[parts.length - 1]);
+      if (lastMcpDeleteName === "gemini-websearch") {
+        await route.fulfill({
+          status: 403,
+          body: "Cannot delete built-in server",
+        });
+      } else {
+        mcpServers = mcpServers.filter((s) => s.name !== lastMcpDeleteName);
+        await route.fulfill({ status: 204 });
+      }
+    } else {
+      // Fall through to more-specific routes (oauth-discover, oauth-register, oauth-start)
+      await route.fallback();
+    }
+  });
+  await page.route("**/api/mcp-servers", async (route) => {
+    if (route.request().method() === "POST") {
+      if (opts.mcpAddError) {
+        await route.fulfill({ status: 500, body: "Internal Server Error" });
+      } else {
+        lastMcpAddBody = route.request().postDataJSON() as {
+          name: string;
+          url: string;
+          headers?: Record<string, string>;
+        };
+        if (mcpServers.some((s) => s.name === lastMcpAddBody!.name)) {
+          await route.fulfill({
+            status: 409,
+            body: "Server name already exists",
+          });
+        } else {
+          mcpServers.push({
+            name: lastMcpAddBody.name,
+            type: "http",
+            url: lastMcpAddBody.url,
+            headers: lastMcpAddBody.headers,
+          });
+          await route.fulfill({ status: 201 });
+        }
+      }
+    } else {
+      // GET
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(mcpServers),
+      });
+    }
+  });
+
   // ── Stop endpoint ────────────────────────────────────────────────────────
   await page.route("**/chat-stop", async (route) => {
     stopReceived = true;
@@ -596,8 +773,9 @@ export async function setupApp(
   await page.route("**/rootfs/delete", async (route) => {
     lastResetBody = (await route.request().headerValue("x-csrf-token")) ?? null;
     await route.fulfill({
-      status: 303,
-      headers: { Location: "http://localhost/" },
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true }),
     });
   });
 
@@ -757,6 +935,12 @@ export async function setupApp(
     },
     lastDeleteCsrfToken: () => lastDeleteCsrfTokenValue,
     renewGatewayKeyRequested: () => renewGatewayKeyReceived,
+    lastMcpAdd: () => lastMcpAddBody,
+    lastMcpDelete: () => lastMcpDeleteName,
+    lastMcpRegister: () => lastMcpRegisterBody,
+    pushMcpServer: (server: McpServerEntry) => {
+      mcpServers.push(server);
+    },
   };
 }
 

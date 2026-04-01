@@ -13,7 +13,8 @@ pub(crate) async fn create_tap(
     let status = Command::new(net_helper_path)
         .args(["tap-create", tap_name, &tap_ip.to_string()])
         .status()
-        .await?;
+        .await
+        .context("failed to create tap interface")?;
     if !status.success() {
         bail!("net-helper tap-create failed for {tap_name}: {status}");
     }
@@ -21,10 +22,14 @@ pub(crate) async fn create_tap(
 }
 
 pub(crate) async fn delete_tap(net_helper_path: &Path, tap_name: &str) {
-    let _ = Command::new(net_helper_path)
+    if Command::new(net_helper_path)
         .args(["tap-delete", tap_name])
         .status()
-        .await;
+        .await
+        .is_err()
+    {
+        warn!("failed to delete tap {tap_name}");
+    }
 }
 
 pub(crate) fn format_tap_name(idx: u8) -> String {
@@ -44,10 +49,7 @@ pub(crate) fn format_guest_mac(idx: u8) -> MacAddr6 {
 }
 
 pub async fn setup_host_networking(net_helper_path: &Path) -> Result<()> {
-    let Some(host_iface) = fetch_host_iface_name().await else {
-        warn!("could not determine host interface, skipping NAT setup");
-        return Ok(());
-    };
+    let host_iface = fetch_host_iface_name().await?;
     run_nat_setup(net_helper_path, &host_iface).await
 }
 
@@ -63,20 +65,22 @@ async fn run_nat_setup(net_helper_path: &Path, host_iface: &str) -> Result<()> {
     Ok(())
 }
 
-async fn fetch_host_iface_name() -> Option<String> {
+async fn fetch_host_iface_name() -> Result<String> {
     let output = Command::new("ip")
         .args(["route", "list", "default"])
         .output()
         .await
-        .ok()?;
+        .context("failed to run 'ip route list default'")?;
     let route_output = String::from_utf8_lossy(&output.stdout);
     let mut tokens = route_output.split_whitespace();
     while let Some(token) = tokens.next() {
-        if token == "dev" {
-            return tokens.next().map(|s| s.to_string());
+        if token == "dev"
+            && let Some(iface) = tokens.next()
+        {
+            return Ok(iface.to_string());
         }
     }
-    None
+    bail!("no default route interface found in 'ip route list default' output")
 }
 
 #[cfg(test)]

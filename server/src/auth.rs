@@ -1,3 +1,4 @@
+use anyhow::Context;
 use axum::{
     extract::{FromRequestParts, Query, State},
     http::{StatusCode, request::Parts},
@@ -69,6 +70,10 @@ pub(crate) async fn get_callback_handler(
 ) -> Result<Response, AppError> {
     let cognito_state = build_cognito_state(&state);
     let _response = callback(query, session.clone(), State(cognito_state)).await?;
+    session
+        .cycle_id()
+        .await
+        .context("failed to cycle session id")?;
     let email = session
         .get::<String>("email")
         .await

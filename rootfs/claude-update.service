@@ -1,0 +1,15 @@
+[Unit]
+Description=Update Claude CLI on boot
+After=network.target
+Before=agent.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+ExecStart=/home/ubuntu/.local/bin/claude install
+StandardOutput=append:/var/log/agent.log
+StandardError=append:/var/log/agent.log
+
+[Install]
+WantedBy=multi-user.target

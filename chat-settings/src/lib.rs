@@ -7,6 +7,8 @@ use tokio::time::timeout;
 
 const GET_SETTINGS_CMD: &str = "cat ~/.claude/settings.json 2>/dev/null || echo '{}'";
 const SET_SETTINGS_CMD: &str = "mkdir -p ~/.claude && cat > ~/.claude/settings.json";
+const GET_CLAUDE_JSON_CMD: &str = "cat ~/.claude.json 2>/dev/null || echo '{}'";
+const SET_CLAUDE_JSON_CMD: &str = "cat > ~/.claude.json";
 const CHANNEL_SEND_TIMEOUT_SECS: u64 = 30;
 const CHANNEL_WAIT_TIMEOUT_SECS: u64 = 30;
 
@@ -121,14 +123,100 @@ pub async fn set_vm_settings(
     content: &str,
 ) -> Result<()> {
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
-    write_settings_file(&mut ssh_handle, content).await
+    write_file_via_ssh(&mut ssh_handle, SET_SETTINGS_CMD, content).await
 }
 
-async fn write_settings_file(
-    ssh_handle: &mut client::Handle<SshClient>,
+pub async fn get_vm_claude_json_raw(
+    guest_ip: Ipv4Addr,
+    ssh_key_path: &Path,
+    ssh_user: &str,
+    vm_host_key_path: &Path,
+) -> Result<String> {
+    let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
+    let mut channel = open_exec_channel(&mut ssh_handle, GET_CLAUDE_JSON_CMD).await?;
+    let mut stdout = String::new();
+    loop {
+        match timeout(
+            Duration::from_secs(CHANNEL_WAIT_TIMEOUT_SECS),
+            channel.wait(),
+        )
+        .await
+        {
+            Ok(Some(ChannelMsg::Data { ref data })) => {
+                stdout.push_str(from_utf8(data).context("SSH channel returned non-UTF-8 data")?);
+            }
+            Ok(Some(ChannelMsg::ExitStatus { .. })) | Ok(None) => break,
+            Ok(_) => {}
+            Err(_) => return Err(anyhow!("SSH channel read timed out")),
+        }
+    }
+    Ok(stdout)
+}
+
+pub async fn set_vm_claude_json(
+    guest_ip: Ipv4Addr,
+    ssh_key_path: &Path,
+    ssh_user: &str,
+    vm_host_key_path: &Path,
     content: &str,
 ) -> Result<()> {
-    let mut channel = open_exec_channel(ssh_handle, SET_SETTINGS_CMD).await?;
+    let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
+    write_file_via_ssh(&mut ssh_handle, SET_CLAUDE_JSON_CMD, content).await
+}
+
+/// Extract the `mcpServers` map from raw `~/.claude.json` content.
+pub fn parse_mcp_servers(raw: &str) -> Result<serde_json::Map<String, serde_json::Value>> {
+    let root: serde_json::Value =
+        serde_json::from_str(raw).context("failed to parse ~/.claude.json")?;
+    // unwrap_or_default returns an empty Map when mcpServers is missing or not an object
+    Ok(root
+        .get("mcpServers")
+        .and_then(|v| v.as_object())
+        .cloned()
+        .unwrap_or_default())
+}
+
+/// Upsert an MCP server entry into raw `~/.claude.json` content and return the updated JSON string.
+pub fn upsert_mcp_server(raw: &str, name: &str, server: serde_json::Value) -> Result<String> {
+    let mut root: serde_json::Value =
+        serde_json::from_str(raw).context("failed to parse ~/.claude.json")?;
+    let mcp = root
+        .as_object_mut()
+        .context("~/.claude.json is not an object")?
+        .entry("mcpServers")
+        .or_insert_with(|| serde_json::json!({}));
+    mcp.as_object_mut()
+        .context("mcpServers is not an object")?
+        .insert(name.to_owned(), server);
+    serde_json::to_string_pretty(&root).context("serialization failed")
+}
+
+/// Remove an MCP server entry from raw `~/.claude.json` content and return the updated JSON string.
+/// Returns `Ok(None)` if the server was not found.
+pub fn remove_mcp_server(raw: &str, name: &str) -> Result<Option<String>> {
+    let mut root: serde_json::Value =
+        serde_json::from_str(raw).context("failed to parse ~/.claude.json")?;
+    let Some(mcp) = root
+        .as_object_mut()
+        .and_then(|o| o.get_mut("mcpServers"))
+        .and_then(|v| v.as_object_mut())
+    else {
+        return Ok(None);
+    };
+    if mcp.remove(name).is_none() {
+        return Ok(None);
+    }
+    serde_json::to_string_pretty(&root)
+        .context("serialization failed")
+        .map(Some)
+}
+
+async fn write_file_via_ssh(
+    ssh_handle: &mut client::Handle<SshClient>,
+    cmd: &str,
+    content: &str,
+) -> Result<()> {
+    let mut channel = open_exec_channel(ssh_handle, cmd).await?;
     timeout(
         Duration::from_secs(CHANNEL_SEND_TIMEOUT_SECS),
         channel.data(Bytes::copy_from_slice(content.as_bytes()).as_ref()),
@@ -261,5 +349,116 @@ mod tests {
         let json = build_bedrock_settings_json("h", "s", "o").unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(parsed["$schema"].is_string());
+    }
+
+    // --- parse_mcp_servers ---
+
+    #[test]
+    fn parse_mcp_servers_empty_object() {
+        let servers = parse_mcp_servers("{}").unwrap();
+        assert!(servers.is_empty());
+    }
+
+    #[test]
+    fn parse_mcp_servers_with_entries() {
+        let json =
+            r#"{"mcpServers":{"my-server":{"type":"http","url":"https://example.com/mcp"}}}"#;
+        let servers = parse_mcp_servers(json).unwrap();
+        assert_eq!(servers.len(), 1);
+        assert!(servers.contains_key("my-server"));
+        assert_eq!(servers["my-server"]["url"], "https://example.com/mcp");
+    }
+
+    #[test]
+    fn parse_mcp_servers_invalid_json() {
+        assert!(parse_mcp_servers("not json").is_err());
+    }
+
+    #[test]
+    fn parse_mcp_servers_no_mcp_key() {
+        let servers = parse_mcp_servers(r#"{"env":{}}"#).unwrap();
+        assert!(servers.is_empty());
+    }
+
+    // --- upsert_mcp_server ---
+
+    #[test]
+    fn upsert_into_empty() {
+        let result = upsert_mcp_server(
+            "{}",
+            "test",
+            serde_json::json!({"type":"http","url":"https://x.com/mcp"}),
+        )
+        .unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["mcpServers"]["test"]["url"], "https://x.com/mcp");
+    }
+
+    #[test]
+    fn upsert_preserves_existing_servers() {
+        let existing = r#"{"mcpServers":{"old":{"type":"http","url":"https://old.com"}}}"#;
+        let result = upsert_mcp_server(
+            existing,
+            "new",
+            serde_json::json!({"type":"http","url":"https://new.com"}),
+        )
+        .unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["mcpServers"]["old"]["url"], "https://old.com");
+        assert_eq!(parsed["mcpServers"]["new"]["url"], "https://new.com");
+    }
+
+    #[test]
+    fn upsert_preserves_other_fields() {
+        let existing = r#"{"env":{"FOO":"bar"},"mcpServers":{}}"#;
+        let result = upsert_mcp_server(
+            existing,
+            "s",
+            serde_json::json!({"type":"http","url":"https://s.com"}),
+        )
+        .unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["env"]["FOO"], "bar");
+    }
+
+    #[test]
+    fn upsert_overwrites_existing_server() {
+        let existing = r#"{"mcpServers":{"s":{"type":"http","url":"https://old.com"}}}"#;
+        let result = upsert_mcp_server(
+            existing,
+            "s",
+            serde_json::json!({"type":"http","url":"https://new.com"}),
+        )
+        .unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["mcpServers"]["s"]["url"], "https://new.com");
+    }
+
+    // --- remove_mcp_server ---
+
+    #[test]
+    fn remove_existing_server() {
+        let existing = r#"{"mcpServers":{"a":{"type":"http"},"b":{"type":"http"}}}"#;
+        let result = remove_mcp_server(existing, "a").unwrap().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert!(parsed["mcpServers"].get("a").is_none());
+        assert!(parsed["mcpServers"].get("b").is_some());
+    }
+
+    #[test]
+    fn remove_nonexistent_server() {
+        let existing = r#"{"mcpServers":{"a":{"type":"http"}}}"#;
+        assert!(remove_mcp_server(existing, "nope").unwrap().is_none());
+    }
+
+    #[test]
+    fn remove_from_empty_mcp_servers() {
+        assert!(remove_mcp_server("{}", "nope").unwrap().is_none());
+    }
+
+    #[test]
+    fn remove_from_no_mcp_key() {
+        let existing = r#"{"env":{}}"#;
+        assert!(remove_mcp_server(existing, "nope").unwrap().is_none());
     }
 }

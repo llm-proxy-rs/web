@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::Utc;
 use serde::Serialize;
 
@@ -46,7 +46,8 @@ pub fn build_mmds_with_iam(
     // Credentials are stored as a JSON string (leaf node) rather than a nested object.
     // MMDS treats nested objects as directories and returns key listings instead of JSON,
     // which breaks the AWS SDK credential parser.
-    let cred_str = serde_json::to_string(credential)?;
+    let cred_str =
+        serde_json::to_string(credential).context("failed to serialize IAM credential")?;
     let mut security_credentials = serde_json::Map::new();
     security_credentials.insert(role_name.to_string(), serde_json::Value::String(cred_str));
     Ok(serde_json::json!({

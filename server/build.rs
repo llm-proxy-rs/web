@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{fs, path::Path};
 
 fn main() {
     println!("cargo:rerun-if-changed=../frontend/dist/app.js");
@@ -12,9 +12,12 @@ fn main() {
 }
 
 fn hash_file(path: &Path) -> String {
-    match std::fs::read(path) {
+    match fs::read(path) {
         Ok(data) => format!("{:x}", fnv1a(&data)),
-        Err(_) => "dev".to_string(),
+        Err(e) => {
+            println!("cargo:warning=failed to hash {}: {e}", path.display());
+            "dev".to_string()
+        }
     }
 }
 

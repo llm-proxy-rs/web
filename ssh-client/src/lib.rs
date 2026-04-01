@@ -15,7 +15,7 @@ use tokio::time::timeout;
 
 const TERMINAL_EXEC_CMD: &str = "bash -ic 'claude; exec bash'";
 const SSH_OP_TIMEOUT_SECS: u64 = 30;
-const SSH_CONNECT_TIMEOUT_SECS: u64 = 60;
+const SSH_CONNECT_TIMEOUT_SECS: u64 = 10;
 
 pub struct SshClient {
     vm_host_key: Option<PublicKey>,
@@ -159,4 +159,14 @@ pub async fn open_direct_streamlocal_channel(
     .await
     .context("direct-streamlocal channel open timed out")?
     .with_context(|| format!("failed to open direct-streamlocal channel to {socket_path}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ssh_connect_timeout_is_10_seconds() {
+        assert_eq!(SSH_CONNECT_TIMEOUT_SECS, 10);
+    }
 }

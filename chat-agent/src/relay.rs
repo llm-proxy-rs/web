@@ -3,7 +3,10 @@ use bytes::Bytes;
 use futures::stream::Stream;
 use russh::{Channel, ChannelMsg, client};
 use ssh_client::SshClient;
-use std::{net::Ipv4Addr, path::PathBuf};
+use std::{
+    net::Ipv4Addr,
+    path::{Path, PathBuf},
+};
 use tokio::{
     sync::mpsc,
     time::{Duration, interval, timeout},
@@ -31,9 +34,9 @@ pub fn stream_task_sse(
     tokio::spawn(async move {
         if let Err(e) = run_task_stream(
             guest_ip,
-            ssh_key_path,
-            ssh_user,
-            vm_host_key_path,
+            &ssh_key_path,
+            &ssh_user,
+            &vm_host_key_path,
             message,
             tx.clone(),
         )
@@ -47,9 +50,9 @@ pub fn stream_task_sse(
 
 async fn run_task_stream(
     guest_ip: Ipv4Addr,
-    ssh_key_path: PathBuf,
-    ssh_user: String,
-    vm_host_key_path: PathBuf,
+    ssh_key_path: &Path,
+    ssh_user: &str,
+    vm_host_key_path: &Path,
     message: AgentMessage,
     tx: mpsc::Sender<Bytes>,
 ) -> Result<()> {
@@ -59,7 +62,7 @@ async fn run_task_stream(
     // then open_agent_channel retries the Unix socket for another 60s (agent process may still be
     // starting). Total worst-case connect time is ~120s.
     let connect_future =
-        connect_ssh_and_open_channel(guest_ip, &ssh_key_path, &ssh_user, &vm_host_key_path);
+        connect_ssh_and_open_channel(guest_ip, ssh_key_path, ssh_user, vm_host_key_path);
     tokio::pin!(connect_future);
     let connect_result = loop {
         tokio::select! {
@@ -200,4 +203,54 @@ fn data_contains_terminal_event(data: &[u8]) -> bool {
         || data
             .windows(b"event: error_event\n".len())
             .any(|w| w == b"event: error_event\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn terminal_event_done() {
+        assert!(data_contains_terminal_event(b"event: done\n"));
+    }
+
+    #[test]
+    fn terminal_event_error() {
+        assert!(data_contains_terminal_event(b"event: error_event\n"));
+    }
+
+    #[test]
+    fn terminal_event_random_data() {
+        assert!(!data_contains_terminal_event(b"some random data here"));
+    }
+
+    #[test]
+    fn terminal_event_embedded_in_larger_data() {
+        assert!(data_contains_terminal_event(
+            b"data: {\"foo\":1}\n\nevent: done\ndata: {}\n\n"
+        ));
+        assert!(data_contains_terminal_event(
+            b"data: {\"bar\":2}\n\nevent: error_event\ndata: {}\n\n"
+        ));
+    }
+
+    #[test]
+    fn terminal_event_empty_data() {
+        assert!(!data_contains_terminal_event(b""));
+    }
+
+    #[test]
+    fn build_sse_error_event_produces_valid_sse() {
+        let err = anyhow::anyhow!("something went wrong");
+        let result = build_sse_error_event(err).unwrap();
+        let s = std::str::from_utf8(&result).unwrap();
+        assert!(s.starts_with("event: error_event\n"));
+        assert!(s.contains("data: "));
+        assert!(s.ends_with("\n\n"));
+        // Verify the data portion is valid JSON containing the message
+        let data_line = s.lines().find(|l| l.starts_with("data: ")).unwrap();
+        let json_str = data_line.strip_prefix("data: ").unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(json_str).unwrap();
+        assert_eq!(parsed["message"], "something went wrong");
+    }
 }

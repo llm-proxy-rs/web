@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use common::copy_sparse;
 use firecracker_client::{start_instance, stop_instance};
 use nix::{
     sys::signal::{Signal, kill},
@@ -14,8 +13,7 @@ use std::{
     sync::Mutex,
     time::Duration,
 };
-use tokio::fs::rename;
-use tracing::{info, warn};
+use tracing::warn;
 
 use crate::{
     configure::configure_vm,
@@ -88,37 +86,47 @@ impl Vm {
         self.chroot_dir.join("run/firecracker.socket")
     }
 
-    fn rootfs_copy(&self) -> PathBuf {
-        self.chroot_dir.join("rootfs.ext4")
-    }
-
-    pub async fn save_rootfs(&self, dest: &Path) -> Result<()> {
+    /// Gracefully stops the VM so the guest flushes its filesystem.
+    /// The rootfs remains in the chroot — no copy needed.
+    pub async fn stop(&self) {
         stop_vm(&self.socket_path(), self.pid).await;
-        let rootfs_copy = self.rootfs_copy();
-        if rename(&rootfs_copy, dest).await.is_err() {
-            // Use in-process copy so we inherit the server's file capabilities
-            // (CAP_DAC_READ_SEARCH, CAP_DAC_OVERRIDE). Spawned child processes
-            // like `cp` do not inherit these and will get Permission Denied on
-            // jailer-owned files.
-            tokio::fs::copy(&rootfs_copy, dest)
-                .await
-                .with_context(|| format!("failed to copy rootfs to {}", dest.display()))?;
-        }
-        Ok(())
     }
 }
 
 impl Drop for Vm {
     fn drop(&mut self) {
         if let Ok(raw_pid) = i32::try_from(self.pid) {
-            let _ = kill(Pid::from_raw(raw_pid), Signal::SIGTERM);
+            // Kill the entire process group (sudo + jailer + firecracker),
+            // then the individual process as a fallback in case it isn't
+            // the process group leader.
+            let _ = kill(Pid::from_raw(-raw_pid), Signal::SIGKILL);
+            let _ = kill(Pid::from_raw(raw_pid), Signal::SIGKILL);
         }
         let tap_name = format_tap_name(self.net_idx);
         let _ = std::process::Command::new(&self.net_helper_path)
             .args(["tap-delete", &tap_name])
             .status();
-        let _ = std::fs::remove_dir_all(&self.chroot_dir);
+        cleanup_chroot(&self.chroot_dir);
         release_net_idx(self.net_idx);
+    }
+}
+
+/// Removes everything in the chroot directory except rootfs.ext4 and vmlinux.
+pub(crate) fn cleanup_chroot(chroot_dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(chroot_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        if name == "rootfs.ext4" || name == "vmlinux" {
+            continue;
+        }
+        let path = entry.path();
+        if path.is_dir() {
+            let _ = std::fs::remove_dir_all(&path);
+        } else {
+            let _ = std::fs::remove_file(&path);
+        }
     }
 }
 
@@ -129,10 +137,12 @@ async fn stop_vm(socket_path: &Path, pid: u32) {
     if tokio::time::timeout(Duration::from_secs(10), wait_for_process_exit(pid))
         .await
         .is_err()
-        && let Ok(raw_pid) = i32::try_from(pid)
-        && let Err(_) = kill(Pid::from_raw(raw_pid), Signal::SIGKILL)
     {
-        warn!("failed to SIGKILL process {pid}");
+        // Process didn't exit in time — force kill the process group and individual process.
+        if let Ok(raw_pid) = i32::try_from(pid) {
+            let _ = kill(Pid::from_raw(-raw_pid), Signal::SIGKILL);
+            let _ = kill(Pid::from_raw(raw_pid), Signal::SIGKILL);
+        }
     }
 }
 
@@ -154,29 +164,9 @@ pub async fn create_vm(vm_config: &VmConfig) -> Result<Vm> {
     if result.is_err() {
         delete_tap(&vm_config.net_helper_path, &tap_name).await;
         release_net_idx(net_idx);
-        let _ = tokio::fs::remove_dir_all(&chroot_dir).await;
+        cleanup_chroot(&chroot_dir);
     }
     result
-}
-
-async fn prepare_vm_rootfs(
-    source_rootfs: &Path,
-    rootfs_copy: &Path,
-    jailer: &JailerConfig,
-) -> Result<()> {
-    info!("copying rootfs");
-    copy_sparse(source_rootfs, rootfs_copy).await?;
-    // Set permissions before chown — after chown the file is owned by the jailer
-    // user and chmod would require CAP_FOWNER which the server doesn't have.
-    std::fs::set_permissions(rootfs_copy, Permissions::from_mode(0o644))
-        .context("failed to set rootfs permissions")?;
-    nix::unistd::chown(
-        rootfs_copy,
-        Some(Uid::from_raw(jailer.uid)),
-        Some(Gid::from_raw(jailer.gid)),
-    )
-    .context("failed to chown rootfs copy for jailer")?;
-    Ok(())
 }
 
 async fn launch_vm(
@@ -195,11 +185,19 @@ async fn launch_vm(
     let boot_args = build_vm_boot_args(&vm_config.boot_args, &format_guest_ip(net_idx), net_idx);
     let kernel_path_in_jail = PathBuf::from("/vmlinux");
     let rootfs_path_in_jail = PathBuf::from("/rootfs.ext4");
-    let rootfs_copy = chroot_dir.join("rootfs.ext4");
     let socket_path = chroot_dir.join("run/firecracker.socket");
 
     prepare_jail_resources(chroot_dir, &vm_config.kernel_path).await?;
-    prepare_vm_rootfs(&vm_config.rootfs_path, &rootfs_copy, &vm_config.jailer).await?;
+    // Set rootfs permissions for the jailer user (rootfs is already in the chroot)
+    let rootfs_in_chroot = chroot_dir.join("rootfs.ext4");
+    std::fs::set_permissions(&rootfs_in_chroot, Permissions::from_mode(0o644))
+        .context("failed to set rootfs permissions")?;
+    nix::unistd::chown(
+        &rootfs_in_chroot,
+        Some(Uid::from_raw(vm_config.jailer.uid)),
+        Some(Gid::from_raw(vm_config.jailer.gid)),
+    )
+    .context("failed to chown rootfs for jailer")?;
     let child = spawn_firecracker_jailed(&vm_config.id, &vm_config.jailer)?;
     let pid = child
         .id()
@@ -224,4 +222,65 @@ async fn launch_vm(
         net_helper_path: vm_config.net_helper_path.clone(),
         chroot_dir: chroot_dir.to_path_buf(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cleanup_chroot_preserves_rootfs_and_vmlinux() {
+        let tmp = std::env::temp_dir().join("test_cleanup_preserve");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        std::fs::write(tmp.join("rootfs.ext4"), b"rootfs").unwrap();
+        std::fs::write(tmp.join("vmlinux"), b"kernel").unwrap();
+        std::fs::write(tmp.join("other.file"), b"x").unwrap();
+        std::fs::create_dir_all(tmp.join("subdir")).unwrap();
+
+        cleanup_chroot(&tmp);
+
+        assert!(tmp.join("rootfs.ext4").exists());
+        assert!(tmp.join("vmlinux").exists());
+        assert!(!tmp.join("other.file").exists());
+        assert!(!tmp.join("subdir").exists());
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn cleanup_chroot_removes_dev_and_run_dirs() {
+        let tmp = std::env::temp_dir().join("test_cleanup_dev_run");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join("dev/net")).unwrap();
+        std::fs::write(tmp.join("dev/net/tun"), b"").unwrap();
+        std::fs::create_dir_all(tmp.join("run")).unwrap();
+        std::fs::write(tmp.join("run/firecracker.socket"), b"").unwrap();
+
+        cleanup_chroot(&tmp);
+
+        assert!(!tmp.join("dev").exists());
+        assert!(!tmp.join("run").exists());
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn cleanup_chroot_handles_empty_dir() {
+        let tmp = std::env::temp_dir().join("test_cleanup_empty");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        cleanup_chroot(&tmp); // should not panic
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn cleanup_chroot_handles_missing_dir() {
+        let tmp = std::env::temp_dir().join("test_cleanup_missing_nonexistent");
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        cleanup_chroot(&tmp); // should not panic
+    }
 }

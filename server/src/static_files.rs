@@ -62,6 +62,42 @@ pub(crate) async fn serve_styles_css(State(state): State<AppState>) -> Result<Re
         .into_response())
 }
 
+pub(crate) async fn serve_oauth_close(State(state): State<AppState>) -> Result<Response, AppError> {
+    let js_path = state
+        .static_assets
+        .app_js_path
+        .parent()
+        .context("invalid static dir")?
+        .join("oauth-close.js");
+    let file = File::open(&js_path)
+        .await
+        .context("failed to open oauth-close.js")?;
+    let body = Body::from_stream(ReaderStream::new(file));
+    Ok((
+        [
+            (
+                header::CONTENT_TYPE,
+                "application/javascript; charset=utf-8",
+            ),
+            (header::CACHE_CONTROL, "no-cache"),
+        ],
+        body,
+    )
+        .into_response())
+}
+
+pub(crate) fn render_oauth_close_page() -> String {
+    r#"<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"/><title>OAuth</title></head>
+<body style="font-family:sans-serif;text-align:center;padding:40px;background:#0f0f0f;color:#fff">
+<p>OAuth complete. You can close this window.</p>
+<script src="/static/oauth-close.js"></script>
+</body>
+</html>"#
+        .to_string()
+}
+
 pub(crate) async fn serve_font(
     Path(filename): Path<String>,
     State(state): State<AppState>,

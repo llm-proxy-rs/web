@@ -4,6 +4,7 @@
  * UF-47  Reset dialog opens      — clicking the button opens the confirmation dialog
  * UF-48  Reset dialog cancel     — clicking Cancel closes the dialog without navigation
  * UF-49  Reset form submits      — clicking Reset POSTs to /rootfs/delete with the CSRF token
+ * UF-50  Reset triggers reload   — after successful delete the page reloads
  */
 import { test, expect } from "@playwright/test";
 import { setupApp, CSRF_TOKEN } from "./helpers/setup";
@@ -66,5 +67,24 @@ test.describe("reset environment", () => {
 
     expect(request.method()).toBe("POST");
     expect(await request.headerValue("x-csrf-token")).toBe(CSRF_TOKEN);
+  });
+
+  test("UF-50 reset triggers page reload after successful delete", async ({
+    page,
+  }) => {
+    await setupApp(page, { hasUserRootfs: true });
+
+    await page.getByTitle("Reset environment").click();
+    await expect(page.getByText("Reset Environment?")).toBeVisible();
+
+    // Clicking Reset should POST to /rootfs/delete and then reload the page.
+    // waitForNavigation detects the reload triggered by window.location.reload().
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+      page.getByRole("button", { name: "Reset", exact: true }).click(),
+    ]);
+
+    // After reload the app should be back to its initial state
+    await expect(page.getByPlaceholder("Message Claude…")).toBeVisible();
   });
 });

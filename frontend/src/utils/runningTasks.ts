@@ -8,6 +8,8 @@
  * `{ task_id: string, running_session_id: string | null }`
  */
 
+import { safeJsonParse } from "./safeJson";
+
 function storageKey(vmId: string): string {
   return `chat_running_task_${vmId}`;
 }
@@ -16,7 +18,7 @@ export function getRunningTasks(vmId: string): Record<string, string> {
   const raw = localStorage.getItem(storageKey(vmId));
   if (!raw) return {};
   try {
-    const parsed = JSON.parse(raw);
+    const parsed = safeJsonParse<unknown>(raw);
     if (typeof parsed !== "object" || parsed === null) return {};
     // Backwards compat: old format had { task_id, running_session_id }
     if ("task_id" in parsed && typeof parsed.task_id === "string") {

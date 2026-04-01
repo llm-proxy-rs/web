@@ -17,14 +17,12 @@ use tokio::time::timeout;
 use tracing::{error, info, warn};
 use url::Url;
 use uuid::Uuid;
-use vm_lifecycle::{VmEntry, build_user_rootfs_path};
 
 use crate::{
     handlers::UserVm,
     state::{AppError, AppState, update_vm_last_activity},
 };
 
-const LOCK_TIMEOUT_SECS: u64 = 30;
 const SEND_TIMEOUT_SECS: u64 = 30;
 
 pub(crate) async fn handle_ws_upgrade(
@@ -51,38 +49,32 @@ pub(crate) async fn handle_ws_upgrade(
             return Ok((StatusCode::FORBIDDEN, "Origin mismatch").into_response());
         }
     }
+    let vm_id = user_vm.vm_id.clone();
     Ok(ws.on_upgrade(move |socket| async move {
-        run_terminal_session(
-            socket,
-            state,
-            user_vm.vm_id.clone(),
-            user_vm.user_id,
-            user_vm.guest_ip,
-        )
-        .await
+        run_terminal_session(socket, &state, &vm_id, user_vm.user_id, user_vm.guest_ip).await
     }))
 }
 
 async fn run_terminal_session(
     ws: WebSocket,
-    state: AppState,
-    vm_id: String,
+    state: &AppState,
+    vm_id: &str,
     user_id: Uuid,
     guest_ip: Ipv4Addr,
 ) {
-    if update_vm_last_activity(&state.vms, &vm_id).is_err() {
+    if update_vm_last_activity(&state.vms, vm_id).is_err() {
         error!("vm registry lock poisoned, aborting terminal session");
         return;
     }
-    if run_ssh_relay(guest_ip, &state, &vm_id, ws).await.is_err() {
+    if run_ssh_relay(guest_ip, state, vm_id, ws).await.is_err() {
         error!("terminal session error");
     }
-    if save_and_drop_vm(&state, &vm_id, user_id).await.is_err() {
+    if save_and_drop_vm(state, vm_id, user_id).await.is_err() {
         error!("save and drop vm failed");
     }
 }
 
-async fn save_and_drop_vm(state: &AppState, vm_id: &str, user_id: Uuid) -> Result<()> {
+async fn save_and_drop_vm(state: &AppState, vm_id: &str, _user_id: Uuid) -> Result<()> {
     let vm_entry = {
         let mut registry = state
             .vms
@@ -91,32 +83,15 @@ async fn save_and_drop_vm(state: &AppState, vm_id: &str, user_id: Uuid) -> Resul
         registry.remove(vm_id)
     };
     if let Some(vm_entry) = vm_entry {
-        save_vm_rootfs_on_disconnect(state, user_id, vm_entry).await?;
+        info!("stopping vm on disconnect");
+        // Stop the VM and wait for the process to fully exit before
+        // dropping. This ensures cleanup_chroot + release_net_idx in
+        // Vm::Drop run before a new VM can be provisioned for the same
+        // user (preventing "Text file busy" and tap index conflicts).
+        vm_entry.vm.stop().await;
+        drop(vm_entry);
     }
     Ok(())
-}
-
-async fn save_vm_rootfs_on_disconnect(
-    state: &AppState,
-    user_id: Uuid,
-    vm_entry: VmEntry,
-) -> Result<()> {
-    tokio::fs::create_dir_all(&state.config.user_rootfs_dir)
-        .await
-        .context("failed to create user rootfs dir on disconnect")?;
-    let user_rootfs = build_user_rootfs_path(&state.config.user_rootfs_dir, user_id);
-    let _guard = timeout(
-        Duration::from_secs(LOCK_TIMEOUT_SECS),
-        state.rootfs_lock.lock(),
-    )
-    .await
-    .context("timed out waiting for rootfs lock")?;
-    info!("saving rootfs on disconnect");
-    vm_entry
-        .vm
-        .save_rootfs(&user_rootfs)
-        .await
-        .context("failed to save rootfs")
 }
 
 async fn run_ssh_relay(
@@ -242,9 +217,15 @@ async fn send_ws_keepalive(ws_sender: &mut SplitSink<WebSocket, Message>) -> Res
 const MAX_TERMINAL_COLS: u32 = 500;
 const MAX_TERMINAL_ROWS: u32 = 500;
 
-/// Parse a resize JSON message and return validated (cols, rows), or None if
+#[derive(Debug, PartialEq)]
+struct TerminalSize {
+    cols: u32,
+    rows: u32,
+}
+
+/// Parse a resize JSON message and return validated terminal size, or None if
 /// the message is not a resize or has invalid values.
-fn parse_resize_message(text: &str) -> Option<(u32, u32)> {
+fn parse_resize_message(text: &str) -> Option<TerminalSize> {
     let json = serde_json::from_str::<serde_json::Value>(text).ok()?;
     if json["type"] != "resize" {
         return None;
@@ -254,14 +235,14 @@ fn parse_resize_message(text: &str) -> Option<(u32, u32)> {
     if !(1..=MAX_TERMINAL_COLS).contains(&cols) || !(1..=MAX_TERMINAL_ROWS).contains(&rows) {
         return None;
     }
-    Some((cols, rows))
+    Some(TerminalSize { cols, rows })
 }
 
 async fn handle_resize_message(ssh_channel: &mut Channel<Msg>, text: &str) -> Result<()> {
-    if let Some((cols, rows)) = parse_resize_message(text) {
+    if let Some(terminal_size) = parse_resize_message(text) {
         timeout(
             Duration::from_secs(SEND_TIMEOUT_SECS),
-            ssh_channel.window_change(cols, rows, 0, 0),
+            ssh_channel.window_change(terminal_size.cols, terminal_size.rows, 0, 0),
         )
         .await
         .context("window_change timed out")?
@@ -277,7 +258,9 @@ mod tests {
     #[test]
     fn resize_valid_cols_rows() {
         let msg = r#"{"type":"resize","cols":80,"rows":24}"#;
-        assert_eq!(parse_resize_message(msg), Some((80, 24)));
+        let terminal_size = parse_resize_message(msg).unwrap();
+        assert_eq!(terminal_size.cols, 80);
+        assert_eq!(terminal_size.rows, 24);
     }
 
     #[test]
@@ -307,7 +290,9 @@ mod tests {
     #[test]
     fn resize_at_max_accepted() {
         let msg = r#"{"type":"resize","cols":500,"rows":500}"#;
-        assert_eq!(parse_resize_message(msg), Some((500, 500)));
+        let terminal_size = parse_resize_message(msg).unwrap();
+        assert_eq!(terminal_size.cols, 500);
+        assert_eq!(terminal_size.rows, 500);
     }
 
     #[test]
