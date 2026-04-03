@@ -1,8 +1,8 @@
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use bytes::Bytes;
-use russh::{ChannelMsg, client};
-use ssh_client::{SshClient, connect_ssh, open_exec_channel};
+use russh::ChannelMsg;
+use ssh_client::{connect_ssh, open_exec_channel};
 use std::{
     net::Ipv4Addr,
     path::{Path, PathBuf},
@@ -100,18 +100,15 @@ impl VmConfigOps for SshVmConfigOps {
         .await
     }
     async fn write_file(&self, guest_ip: Ipv4Addr, cmd: &str, content: &str) -> Result<()> {
-        timeout(Duration::from_secs(TOTAL_OP_TIMEOUT_SECS), async {
-            let mut ssh_handle = connect_ssh(
-                guest_ip,
-                &self.ssh_key_path,
-                &self.ssh_user,
-                &self.vm_host_key_path,
-            )
-            .await?;
-            write_file_via_ssh_unbounded(&mut ssh_handle, cmd, content).await
-        })
+        write_file_via_ssh(
+            guest_ip,
+            &self.ssh_key_path,
+            &self.ssh_user,
+            &self.vm_host_key_path,
+            cmd,
+            content,
+        )
         .await
-        .context("write_file timed out")?
     }
 }
 
@@ -255,8 +252,15 @@ pub async fn set_vm_settings_unbounded(
     vm_host_key_path: &Path,
     content: &str,
 ) -> Result<()> {
-    let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
-    write_file_via_ssh_unbounded(&mut ssh_handle, SET_SETTINGS_CMD, content).await
+    write_file_via_ssh_unbounded(
+        guest_ip,
+        ssh_key_path,
+        ssh_user,
+        vm_host_key_path,
+        SET_SETTINGS_CMD,
+        content,
+    )
+    .await
 }
 
 pub async fn set_vm_settings(
@@ -323,8 +327,15 @@ pub async fn set_vm_claude_json_unbounded(
     vm_host_key_path: &Path,
     content: &str,
 ) -> Result<()> {
-    let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
-    write_file_via_ssh_unbounded(&mut ssh_handle, SET_CLAUDE_JSON_CMD, content).await
+    write_file_via_ssh_unbounded(
+        guest_ip,
+        ssh_key_path,
+        ssh_user,
+        vm_host_key_path,
+        SET_CLAUDE_JSON_CMD,
+        content,
+    )
+    .await
 }
 
 pub async fn set_vm_claude_json(
@@ -390,11 +401,15 @@ pub fn remove_mcp_server(raw: &str, name: &str) -> Result<Option<String>> {
 }
 
 async fn write_file_via_ssh_unbounded(
-    ssh_handle: &mut client::Handle<SshClient>,
+    guest_ip: Ipv4Addr,
+    ssh_key_path: &Path,
+    ssh_user: &str,
+    vm_host_key_path: &Path,
     cmd: &str,
     content: &str,
 ) -> Result<()> {
-    let mut channel = open_exec_channel(ssh_handle, cmd).await?;
+    let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
+    let mut channel = open_exec_channel(&mut ssh_handle, cmd).await?;
     timeout(
         Duration::from_secs(CHANNEL_SEND_TIMEOUT_SECS),
         channel.data(Bytes::copy_from_slice(content.as_bytes()).as_ref()),
@@ -423,6 +438,29 @@ async fn write_file_via_ssh_unbounded(
         }
     }
     Ok(())
+}
+
+async fn write_file_via_ssh(
+    guest_ip: Ipv4Addr,
+    ssh_key_path: &Path,
+    ssh_user: &str,
+    vm_host_key_path: &Path,
+    cmd: &str,
+    content: &str,
+) -> Result<()> {
+    timeout(
+        Duration::from_secs(TOTAL_OP_TIMEOUT_SECS),
+        write_file_via_ssh_unbounded(
+            guest_ip,
+            ssh_key_path,
+            ssh_user,
+            vm_host_key_path,
+            cmd,
+            content,
+        ),
+    )
+    .await
+    .context("write_file_via_ssh timed out")?
 }
 
 /// Generic SSH command execution - runs a command and returns stdout.
