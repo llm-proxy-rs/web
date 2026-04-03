@@ -352,14 +352,12 @@ pub(crate) async fn vm_status_handler(
             Ok(new_vm) => {
                 // Write settings before registering so the VM is not visible
                 // as "ready" until the API key / bedrock config is in place.
-                // Retry with a total timeout — the VM needs time to boot SSH.
-                let settings_result = timeout(
-                    Duration::from_secs(90),
-                    retry_write_settings(&state_clone, new_vm.guest_ip, &gateway_key),
-                )
-                .await;
-                if !matches!(settings_result, Ok(Ok(()))) {
-                    error!("timed out or failed writing VM settings, registering VM anyway");
+                // Retries to allow time for the VM to boot SSH.
+                if retry_write_settings(&state_clone, new_vm.guest_ip, &gateway_key)
+                    .await
+                    .is_err()
+                {
+                    error!("failed writing VM settings, registering VM anyway");
                 }
                 if register_vm(
                     &state_clone.vms,
