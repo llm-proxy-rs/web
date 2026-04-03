@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Paperclip, Send, Square, X } from "lucide-react";
 import { useSse } from "../contexts/SseContext";
+import CommandPalette from "./CommandPalette";
 import ModelChip from "./ModelChip";
 
 interface ChatComposerProps {
@@ -9,7 +10,6 @@ interface ChatComposerProps {
   onStop: () => void;
   focusKey?: number;
   droppedFiles?: File[];
-  queuedCount?: number;
 }
 
 export default function ChatComposer({
@@ -18,17 +18,37 @@ export default function ChatComposer({
   onStop,
   focusKey,
   droppedFiles,
-  queuedCount = 0,
 }: ChatComposerProps) {
-  const { uploadAction, uploadDir, csrfFetch } = useSse();
+  const { uploadAction, csrfFetch } = useSse();
 
   const [input, setInput] = useState("");
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [showCommands, setShowCommands] = useState(false);
+  const [commandFilter, setCommandFilter] = useState("");
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [imageUrls, setImageUrls] = useState<Map<string, string>>(new Map());
+  const [stashedDraft, setStashedDraft] = useState<string | null>(null);
+
+  // Stash draft when streaming starts, restore when it ends
+  const prevLoading = useRef(isLoading);
+  useEffect(() => {
+    if (isLoading && !prevLoading.current) {
+      // Streaming just started — save current input if non-empty
+      if (input.trim()) {
+        setStashedDraft(input);
+        setInput("");
+        if (textareaRef.current) textareaRef.current.style.height = "auto";
+      }
+    } else if (!isLoading && prevLoading.current && stashedDraft) {
+      // Streaming just ended — restore draft
+      setInput(stashedDraft);
+      setStashedDraft(null);
+    }
+    prevLoading.current = isLoading;
+  }, [isLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Clean up object URLs on unmount
   useEffect(() => {
@@ -137,15 +157,7 @@ export default function ChatComposer({
     if (textareaRef.current) textareaRef.current.style.height = "auto";
     textareaRef.current?.focus();
     onSend(finalText);
-  }, [
-    input,
-    uploading,
-    pendingFiles,
-    uploadAction,
-    csrfFetch,
-    uploadDir,
-    onSend,
-  ]);
+  }, [input, uploading, pendingFiles, uploadAction, csrfFetch, onSend]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -166,7 +178,29 @@ export default function ChatComposer({
     const target = e.target as HTMLTextAreaElement;
     target.style.height = "auto";
     target.style.height = Math.min(target.scrollHeight, 260) + "px";
-    setInput(target.value);
+    const val = target.value;
+    setInput(val);
+    if (val.startsWith("/") && !val.includes(" ") && !val.includes("\n")) {
+      setShowCommands(true);
+      setCommandFilter(val.slice(1));
+    } else {
+      setShowCommands(false);
+    }
+  }, []);
+
+  const handleCommandSelect = useCallback(
+    (command: string) => {
+      setShowCommands(false);
+      setInput("");
+      if (textareaRef.current) textareaRef.current.style.height = "auto";
+      textareaRef.current?.focus();
+      onSend(command);
+    },
+    [onSend],
+  );
+
+  const handleCommandClose = useCallback(() => {
+    setShowCommands(false);
   }, []);
 
   return (
@@ -209,6 +243,15 @@ export default function ChatComposer({
             </div>
           )}
 
+          {/* Command palette */}
+          {showCommands && (
+            <CommandPalette
+              filter={commandFilter}
+              onSelect={handleCommandSelect}
+              onClose={handleCommandClose}
+            />
+          )}
+
           {/* Input row */}
           <div className="flex items-center gap-2 rounded-2xl border border-border bg-card px-3 py-2 shadow-lg shadow-black/8 transition-shadow duration-250 focus-within:border-primary/25 focus-within:shadow-xl focus-within:shadow-primary/8 focus-within:ring-2 focus-within:ring-primary/10">
             {/* File upload button */}
@@ -234,13 +277,7 @@ export default function ChatComposer({
               value={input}
               onInput={handleInput}
               onKeyDown={handleKeyDown}
-              placeholder={
-                isLoading
-                  ? queuedCount > 0
-                    ? `Type to queue a message (${queuedCount} pending)…`
-                    : "Type to queue a message…"
-                  : "Message Claude…"
-              }
+              placeholder="Message Claude…"
               rows={1}
               className="max-h-[260px] min-h-[32px] flex-1 resize-none bg-transparent py-[5px] text-base leading-snug text-foreground placeholder-muted-foreground/40 focus:outline-none"
               style={{ height: "32px" }}
@@ -276,6 +313,14 @@ export default function ChatComposer({
               </div>
             )}
           </div>
+
+          {stashedDraft && (
+            <div className="mt-1.5 px-1">
+              <span className="text-xs text-primary/70">
+                Draft saved — will restore when done
+              </span>
+            </div>
+          )}
         </div>
       </div>
     </div>

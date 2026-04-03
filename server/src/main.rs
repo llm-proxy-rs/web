@@ -6,14 +6,20 @@ mod files;
 mod gateway_auth;
 mod gateway_callback;
 mod handlers;
+mod http_client;
 mod mcp;
 mod mcp_oauth;
+mod memory;
 mod settings;
+mod skills;
 mod state;
 mod static_files;
 mod templates;
 mod terminal;
 mod upload;
+
+#[cfg(test)]
+mod test_helpers;
 
 use anyhow::{Context, Result};
 use axum::{
@@ -26,6 +32,7 @@ use axum::{
 };
 use firecracker_manager::{clean_stale_vms, setup_host_networking};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::Arc;
 use time::Duration;
 use tokio::{net::TcpListener, signal, sync::oneshot, task::AbortHandle};
 use tower_sessions::{ExpiredDeletion, Expiry, SessionManagerLayer, cookie::SameSite};
@@ -59,7 +66,12 @@ use crate::{
         discover_handler as mcp_oauth_discover_handler,
         register_handler as mcp_oauth_register_handler, start_handler as mcp_oauth_start_handler,
     },
+    memory::get_memory_handler,
     settings::{get_settings_handler, put_settings_handler},
+    skills::{
+        create_handler as skills_create_handler, delete_handler as skills_delete_handler,
+        list_handler as skills_list_handler,
+    },
     state::{AppState, load_config},
     static_files::{
         load_static_assets, render_oauth_close_page, serve_app_js, serve_font, serve_oauth_close,
@@ -82,7 +94,23 @@ async fn main() -> Result<()> {
     let pg_pool = store::connect_db(&app_config.database_url).await?;
     store::run_migrations(&pg_pool).await?;
     let session_store_handle = create_session_store(pg_pool.clone()).await?;
-    let app_state = AppState::new(app_config, pg_pool, static_assets);
+    let vm_config_ops: Arc<dyn chat_settings::VmConfigOps> =
+        Arc::new(chat_settings::SshVmConfigOps {
+            ssh_key_path: app_config.ssh_key_path.clone(),
+            ssh_user: app_config.ssh_user.clone(),
+            vm_host_key_path: app_config.vm_host_key_path.clone(),
+        });
+    let http_client: Arc<dyn http_client::HttpClient> = Arc::new(
+        http_client::ReqwestHttpClient::new(std::time::Duration::from_secs(15))
+            .expect("failed to build HTTP client"),
+    );
+    let app_state = AppState::new(
+        app_config,
+        pg_pool,
+        static_assets,
+        vm_config_ops,
+        http_client,
+    );
     let port = app_state.config.port;
     clean_stale_vms(
         &app_state.config.net_helper_path,
@@ -191,6 +219,12 @@ fn build_router(app_state: AppState, session_store: PostgresStore) -> Router {
         )
         .route("/api/vm-status", get(vm_status_handler))
         .route("/api/csrf-token", get(get_csrf_token_handler))
+        .route("/api/memory", get(get_memory_handler))
+        .route(
+            "/api/skills",
+            get(skills_list_handler).post(skills_create_handler),
+        )
+        .route("/api/skills/{name}", delete(skills_delete_handler))
         .route("/rootfs/delete", post(delete_user_rootfs_handler))
         .route("/terminal/{id}", get(get_terminal_page))
         .route("/ws", get(handle_ws_upgrade))

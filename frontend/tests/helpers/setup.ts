@@ -897,9 +897,7 @@ export async function setupApp(
   if (opts.vmId === "") {
     await page.waitForSelector("text=Starting environment");
   } else {
-    await page.waitForSelector(
-      'textarea[placeholder="Message Claude…"], textarea[placeholder^="Type to queue"]',
-    );
+    await page.waitForSelector('textarea[placeholder="Message Claude…"]');
   }
 
   return {

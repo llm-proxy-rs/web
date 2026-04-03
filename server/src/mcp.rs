@@ -4,10 +4,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chat_settings::{
-    get_vm_claude_json_raw, parse_mcp_servers, remove_mcp_server, set_vm_claude_json,
-    upsert_mcp_server,
-};
+use chat_settings::{parse_mcp_servers, remove_mcp_server, upsert_mcp_server};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use url::Url;
@@ -39,10 +36,7 @@ pub(crate) struct AddMcpServerBody {
 }
 
 fn validate_server_name(name: &str) -> Result<(), validator::ValidationError> {
-    if name
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
-    {
+    if is_valid_server_name(name) {
         Ok(())
     } else {
         Err(validator::ValidationError::new("invalid_server_name"))
@@ -51,7 +45,10 @@ fn validate_server_name(name: &str) -> Result<(), validator::ValidationError> {
 
 fn validate_url(url: &str) -> Result<(), validator::ValidationError> {
     let parsed = Url::parse(url).map_err(|_| validator::ValidationError::new("invalid_url"))?;
-    if (parsed.scheme() != "https" && parsed.scheme() != "http") || parsed.as_str() != url {
+    let scheme = parsed.scheme();
+    if (scheme != "https" && scheme != "http")
+        || (parsed.as_str() != url && parsed.as_str() != format!("{url}/"))
+    {
         return Err(validator::ValidationError::new("invalid_url"));
     }
     Ok(())
@@ -78,13 +75,10 @@ pub(crate) async fn list_handler(
     user_vm: UserVm,
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
-    let raw = get_vm_claude_json_raw(
-        user_vm.guest_ip,
-        &state.config.ssh_key_path,
-        &state.config.ssh_user,
-        &state.config.vm_host_key_path,
-    )
-    .await?;
+    let raw = state
+        .vm_config_ops
+        .get_claude_json_raw(user_vm.guest_ip)
+        .await?;
     let servers = parse_mcp_servers(raw.trim())?;
     let entries: Vec<McpServerEntry> = servers
         .into_iter()
@@ -133,13 +127,10 @@ pub(crate) async fn add_handler(
         }
     }
 
-    let raw = get_vm_claude_json_raw(
-        user_vm.guest_ip,
-        &state.config.ssh_key_path,
-        &state.config.ssh_user,
-        &state.config.vm_host_key_path,
-    )
-    .await?;
+    let raw = state
+        .vm_config_ops
+        .get_claude_json_raw(user_vm.guest_ip)
+        .await?;
 
     let existing = parse_mcp_servers(raw.trim())?;
     if existing.contains_key(&body.name) {
@@ -155,14 +146,10 @@ pub(crate) async fn add_handler(
     }
 
     let updated = upsert_mcp_server(raw.trim(), &body.name, server)?;
-    set_vm_claude_json(
-        user_vm.guest_ip,
-        &state.config.ssh_key_path,
-        &state.config.ssh_user,
-        &state.config.vm_host_key_path,
-        &updated,
-    )
-    .await?;
+    state
+        .vm_config_ops
+        .set_claude_json(user_vm.guest_ip, &updated)
+        .await?;
     Ok(StatusCode::CREATED.into_response())
 }
 
@@ -179,26 +166,19 @@ pub(crate) async fn delete_handler(
         return Ok((StatusCode::FORBIDDEN, "Cannot delete built-in server").into_response());
     }
 
-    let raw = get_vm_claude_json_raw(
-        user_vm.guest_ip,
-        &state.config.ssh_key_path,
-        &state.config.ssh_user,
-        &state.config.vm_host_key_path,
-    )
-    .await?;
+    let raw = state
+        .vm_config_ops
+        .get_claude_json_raw(user_vm.guest_ip)
+        .await?;
 
     let Some(updated) = remove_mcp_server(raw.trim(), &name)? else {
         return Ok(StatusCode::NOT_FOUND.into_response());
     };
 
-    set_vm_claude_json(
-        user_vm.guest_ip,
-        &state.config.ssh_key_path,
-        &state.config.ssh_user,
-        &state.config.vm_host_key_path,
-        &updated,
-    )
-    .await?;
+    state
+        .vm_config_ops
+        .set_claude_json(user_vm.guest_ip, &updated)
+        .await?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
@@ -239,6 +219,8 @@ mod tests {
     #[test]
     fn valid_urls() {
         assert!(is_valid_url("https://example.com/mcp"));
+        assert!(is_valid_url("https://example.com/mcp/"));
+        assert!(is_valid_url("https://example.com"));
         assert!(is_valid_url("http://localhost:8080/mcp"));
         assert!(is_valid_url("https://34.49.122.135/mcp"));
     }
@@ -290,5 +272,131 @@ mod tests {
     fn header_value_at_max_length() {
         assert!(is_valid_header("key", &"a".repeat(4096)));
         assert!(!is_valid_header("key", &"a".repeat(4097)));
+    }
+
+    // ── handler integration tests ─────────────────────────────────────
+
+    use axum::extract::State;
+    use std::net::Ipv4Addr;
+    use std::sync::Arc;
+    use uuid::Uuid;
+
+    use crate::handlers::UserVm;
+    use crate::test_helpers::{MockHttpClient, MockVmConfigOps, test_app_state};
+
+    fn test_user_vm() -> UserVm {
+        UserVm {
+            user_id: Uuid::nil(),
+            vm_id: "test-vm".into(),
+            guest_ip: Ipv4Addr::new(10, 0, 0, 1),
+        }
+    }
+
+    #[tokio::test]
+    async fn list_handler_returns_servers() {
+        let json =
+            r#"{"mcpServers":{"my-server":{"type":"http","url":"https://example.com/mcp"}}}"#;
+        let mock = Arc::new(MockVmConfigOps::new(json, "{}"));
+        let state = test_app_state(mock, Arc::new(MockHttpClient::empty()));
+        let resp = list_handler(test_user_vm(), State(state)).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn list_handler_empty() {
+        let mock = Arc::new(MockVmConfigOps::new("{}", "{}"));
+        let state = test_app_state(mock, Arc::new(MockHttpClient::empty()));
+        let resp = list_handler(test_user_vm(), State(state)).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn add_handler_creates_server() {
+        let mock = Arc::new(MockVmConfigOps::new("{}", "{}"));
+        let state = test_app_state(mock.clone(), Arc::new(MockHttpClient::empty()));
+        let body = AddMcpServerBody {
+            name: "new-server".into(),
+            url: "https://example.com/mcp".into(),
+            headers: HashMap::new(),
+        };
+        let resp = add_handler(test_user_vm(), State(state), Json(body))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let written = mock.claude_json.lock().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&written).unwrap();
+        assert_eq!(
+            parsed["mcpServers"]["new-server"]["url"],
+            "https://example.com/mcp"
+        );
+    }
+
+    #[tokio::test]
+    async fn add_handler_rejects_duplicate() {
+        let json = r#"{"mcpServers":{"my-server":{"type":"http","url":"https://old.com"}}}"#;
+        let mock = Arc::new(MockVmConfigOps::new(json, "{}"));
+        let state = test_app_state(mock, Arc::new(MockHttpClient::empty()));
+        let body = AddMcpServerBody {
+            name: "my-server".into(),
+            url: "https://new.com/mcp".into(),
+            headers: HashMap::new(),
+        };
+        let resp = add_handler(test_user_vm(), State(state), Json(body))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn add_handler_rejects_invalid_name() {
+        let mock = Arc::new(MockVmConfigOps::new("{}", "{}"));
+        let state = test_app_state(mock, Arc::new(MockHttpClient::empty()));
+        let body = AddMcpServerBody {
+            name: "bad name!".into(),
+            url: "https://example.com/mcp".into(),
+            headers: HashMap::new(),
+        };
+        let resp = add_handler(test_user_vm(), State(state), Json(body))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn delete_handler_removes_server() {
+        let json = r#"{"mcpServers":{"my-server":{"type":"http","url":"https://old.com"}}}"#;
+        let mock = Arc::new(MockVmConfigOps::new(json, "{}"));
+        let state = test_app_state(mock.clone(), Arc::new(MockHttpClient::empty()));
+        let resp = delete_handler(test_user_vm(), State(state), RoutePath("my-server".into()))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+        let written = mock.claude_json.lock().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&written).unwrap();
+        assert!(parsed["mcpServers"].get("my-server").is_none());
+    }
+
+    #[tokio::test]
+    async fn delete_handler_not_found() {
+        let mock = Arc::new(MockVmConfigOps::new("{}", "{}"));
+        let state = test_app_state(mock, Arc::new(MockHttpClient::empty()));
+        let resp = delete_handler(test_user_vm(), State(state), RoutePath("nope".into()))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn delete_handler_rejects_builtin() {
+        let mock = Arc::new(MockVmConfigOps::new("{}", "{}"));
+        let state = test_app_state(mock, Arc::new(MockHttpClient::empty()));
+        let resp = delete_handler(
+            test_user_vm(),
+            State(state),
+            RoutePath("gemini-websearch".into()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
     }
 }

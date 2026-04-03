@@ -504,7 +504,7 @@ test.describe("conversation switching", () => {
     // During streaming, placeholder should indicate queuing
     await expect(page.locator("textarea")).toHaveAttribute(
       "placeholder",
-      "Type to queue a message…",
+      "Message Claude…",
     );
 
     // Switch to new chat — placeholder back to normal
@@ -521,7 +521,7 @@ test.describe("conversation switching", () => {
       .click();
     await expect(page.locator("textarea")).toHaveAttribute(
       "placeholder",
-      "Type to queue a message…",
+      "Message Claude…",
     );
 
     // Complete the stream
@@ -799,5 +799,57 @@ test.describe("conversation switching", () => {
     expect(bodies[0].conversation_id).toBe(bodies[2].conversation_id);
     // B1 is different
     expect(bodies[1].conversation_id).not.toBe(bodies[0].conversation_id);
+  });
+
+  test("CS-20 elapsed timer does not reset when switching between running conversations", async ({
+    page,
+  }) => {
+    const ctrl = await setupApp(page, {
+      conversations: [
+        makeConversation({ title: "Timer A" }),
+        makeConversation({ title: "Timer B" }),
+      ],
+    });
+
+    // Start streaming in Timer A
+    await page.getByText("Timer A").click();
+    await sendMessage(page, "Long task A");
+    ctrl.sendSseEvents([
+      { event: "session_start", data: { task_id: "task-a" } },
+      { event: "init" },
+    ]);
+    await expect(page.getByRole("status")).toBeVisible();
+
+    // Wait 3 seconds for the timer to advance
+    await page.waitForTimeout(3000);
+
+    // Verify timer shows at least 2s
+    const statusBefore = await page.getByRole("status").textContent();
+    const matchBefore = statusBefore?.match(/(\d+)s/);
+    expect(matchBefore).toBeTruthy();
+    const secondsBefore = parseInt(matchBefore![1], 10);
+    expect(secondsBefore).toBeGreaterThanOrEqual(2);
+
+    // Switch to Timer B (no streaming — no status)
+    await page.getByText("Timer B").click();
+    await expect(page.getByRole("status")).not.toBeVisible();
+
+    // Wait 1 more second
+    await page.waitForTimeout(1000);
+
+    // Switch back to Timer A — timer should NOT have reset
+    await page.getByText("Timer A").click();
+    await expect(page.getByRole("status")).toBeVisible();
+
+    const statusAfter = await page.getByRole("status").textContent();
+    const matchAfter = statusAfter?.match(/(\d+)s/);
+    expect(matchAfter).toBeTruthy();
+    const secondsAfter = parseInt(matchAfter![1], 10);
+
+    // Timer should be >= what it was before the switch (accounting for the extra wait)
+    expect(secondsAfter).toBeGreaterThanOrEqual(secondsBefore);
+
+    // Clean up
+    ctrl.sendSseEvents(sse.text("Done A", "sess-timer-a"));
   });
 });

@@ -74,12 +74,23 @@ async fn run_terminal_session(
     }
 }
 
-async fn save_and_drop_vm(state: &AppState, vm_id: &str, _user_id: Uuid) -> Result<()> {
+async fn save_and_drop_vm(state: &AppState, vm_id: &str, user_id: Uuid) -> Result<()> {
     let vm_entry = {
         let mut registry = state
             .vms
             .lock()
             .map_err(|_| anyhow::anyhow!("vm registry lock poisoned on disconnect"))?;
+
+        // Mark the user as "provisioning" BEFORE removing the VM from the
+        // registry.  This prevents a race where the frontend polls
+        // /api/vm-status, sees no VM (registry empty), and triggers a new
+        // provisioning while the old VM's stop() + Drop cleanup is still
+        // running — which causes "Text file busy" and "Cannot find device
+        // tap" errors.
+        if let Ok(mut provisioning) = state.provisioning_users.lock() {
+            provisioning.insert(user_id);
+        }
+
         registry.remove(vm_id)
     };
     if let Some(vm_entry) = vm_entry {
@@ -91,6 +102,12 @@ async fn save_and_drop_vm(state: &AppState, vm_id: &str, _user_id: Uuid) -> Resu
         vm_entry.vm.stop().await;
         drop(vm_entry);
     }
+
+    // Release the provisioning guard so a new VM can be created for this user.
+    if let Ok(mut provisioning) = state.provisioning_users.lock() {
+        provisioning.remove(&user_id);
+    }
+
     Ok(())
 }
 

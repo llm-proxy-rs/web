@@ -1,8 +1,14 @@
 use anyhow::{Context, Result, anyhow};
+use async_trait::async_trait;
 use bytes::Bytes;
 use russh::{ChannelMsg, client};
 use ssh_client::{SshClient, connect_ssh, open_exec_channel};
-use std::{net::Ipv4Addr, path::Path, str::from_utf8, time::Duration};
+use std::{
+    net::Ipv4Addr,
+    path::{Path, PathBuf},
+    str::from_utf8,
+    time::Duration,
+};
 use tokio::time::timeout;
 
 const GET_SETTINGS_CMD: &str = "cat ~/.claude/settings.json 2>/dev/null || echo '{}'";
@@ -11,6 +17,98 @@ const GET_CLAUDE_JSON_CMD: &str = "cat ~/.claude.json 2>/dev/null || echo '{}'";
 const SET_CLAUDE_JSON_CMD: &str = "cat > ~/.claude.json";
 const CHANNEL_SEND_TIMEOUT_SECS: u64 = 30;
 const CHANNEL_WAIT_TIMEOUT_SECS: u64 = 30;
+
+/// Abstraction over VM config file operations (read/write ~/.claude.json and ~/.claude/settings.json).
+#[async_trait]
+pub trait VmConfigOps: Send + Sync {
+    async fn get_claude_json_raw(&self, guest_ip: Ipv4Addr) -> Result<String>;
+    async fn set_claude_json(&self, guest_ip: Ipv4Addr, content: &str) -> Result<()>;
+    async fn get_settings(&self, guest_ip: Ipv4Addr) -> Result<VmSettings>;
+    async fn get_settings_raw(&self, guest_ip: Ipv4Addr) -> Result<String>;
+    async fn set_settings(&self, guest_ip: Ipv4Addr, content: &str) -> Result<()>;
+    /// Execute an arbitrary SSH command and return stdout.
+    async fn exec_command(&self, guest_ip: Ipv4Addr, cmd: &str) -> Result<String>;
+    /// Write content to a file via SSH using cat > path.
+    async fn write_file(&self, guest_ip: Ipv4Addr, cmd: &str, content: &str) -> Result<()>;
+}
+
+/// Production implementation that delegates to SSH free functions.
+pub struct SshVmConfigOps {
+    pub ssh_key_path: PathBuf,
+    pub ssh_user: String,
+    pub vm_host_key_path: PathBuf,
+}
+
+#[async_trait]
+impl VmConfigOps for SshVmConfigOps {
+    async fn get_claude_json_raw(&self, guest_ip: Ipv4Addr) -> Result<String> {
+        get_vm_claude_json_raw(
+            guest_ip,
+            &self.ssh_key_path,
+            &self.ssh_user,
+            &self.vm_host_key_path,
+        )
+        .await
+    }
+    async fn set_claude_json(&self, guest_ip: Ipv4Addr, content: &str) -> Result<()> {
+        set_vm_claude_json(
+            guest_ip,
+            &self.ssh_key_path,
+            &self.ssh_user,
+            &self.vm_host_key_path,
+            content,
+        )
+        .await
+    }
+    async fn get_settings(&self, guest_ip: Ipv4Addr) -> Result<VmSettings> {
+        get_vm_settings(
+            guest_ip,
+            &self.ssh_key_path,
+            &self.ssh_user,
+            &self.vm_host_key_path,
+        )
+        .await
+    }
+    async fn get_settings_raw(&self, guest_ip: Ipv4Addr) -> Result<String> {
+        get_vm_settings_raw(
+            guest_ip,
+            &self.ssh_key_path,
+            &self.ssh_user,
+            &self.vm_host_key_path,
+        )
+        .await
+    }
+    async fn set_settings(&self, guest_ip: Ipv4Addr, content: &str) -> Result<()> {
+        set_vm_settings(
+            guest_ip,
+            &self.ssh_key_path,
+            &self.ssh_user,
+            &self.vm_host_key_path,
+            content,
+        )
+        .await
+    }
+    async fn exec_command(&self, guest_ip: Ipv4Addr, cmd: &str) -> Result<String> {
+        exec_ssh_command(
+            guest_ip,
+            &self.ssh_key_path,
+            &self.ssh_user,
+            &self.vm_host_key_path,
+            cmd,
+        )
+        .await
+    }
+    async fn write_file(&self, guest_ip: Ipv4Addr, cmd: &str, content: &str) -> Result<()> {
+        let mut ssh_handle = connect_ssh(
+            guest_ip,
+            &self.ssh_key_path,
+            &self.ssh_user,
+            &self.vm_host_key_path,
+        )
+        .await?;
+        write_file_via_ssh(&mut ssh_handle, cmd, content).await
+    }
+}
 
 pub struct VmSettings {
     pub has_api_key: bool,
@@ -244,6 +342,35 @@ async fn write_file_via_ssh(
         }
     }
     Ok(())
+}
+
+/// Generic SSH command execution - runs a command and returns stdout.
+pub async fn exec_ssh_command(
+    guest_ip: Ipv4Addr,
+    ssh_key_path: &Path,
+    ssh_user: &str,
+    vm_host_key_path: &Path,
+    cmd: &str,
+) -> Result<String> {
+    let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
+    let mut channel = open_exec_channel(&mut ssh_handle, cmd).await?;
+    let mut stdout = String::new();
+    loop {
+        match timeout(
+            Duration::from_secs(CHANNEL_WAIT_TIMEOUT_SECS),
+            channel.wait(),
+        )
+        .await
+        {
+            Ok(Some(ChannelMsg::Data { ref data })) => {
+                stdout.push_str(from_utf8(data).context("SSH channel returned non-UTF-8 data")?);
+            }
+            Ok(Some(ChannelMsg::ExitStatus { .. })) | Ok(None) => break,
+            Ok(_) => {}
+            Err(_) => return Err(anyhow!("SSH channel read timed out")),
+        }
+    }
+    Ok(stdout)
 }
 
 #[cfg(test)]

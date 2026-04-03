@@ -5,9 +5,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chat_settings::{
-    build_api_key_settings_json, get_vm_settings, get_vm_settings_raw, set_vm_settings,
-};
+use chat_settings::build_api_key_settings_json;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -55,13 +53,7 @@ pub(crate) async fn get_settings_handler(
         })
         .into_response());
     }
-    let vm_settings = get_vm_settings(
-        user_vm.guest_ip,
-        &state.config.ssh_key_path,
-        &state.config.ssh_user,
-        &state.config.vm_host_key_path,
-    )
-    .await?;
+    let vm_settings = state.vm_config_ops.get_settings(user_vm.guest_ip).await?;
     Ok(Json(SettingsResponse {
         uses_bedrock: false,
         has_api_key: vm_settings.has_api_key,
@@ -111,37 +103,26 @@ async fn update_api_key_setting(user_vm: &UserVm, state: &AppState, api_key: &st
         &state.config.anthropic_default_sonnet_model,
         &state.config.anthropic_default_opus_model,
     )?;
-    set_vm_settings(
-        user_vm.guest_ip,
-        &state.config.ssh_key_path,
-        &state.config.ssh_user,
-        &state.config.vm_host_key_path,
-        &content,
-    )
-    .await
+    state
+        .vm_config_ops
+        .set_settings(user_vm.guest_ip, &content)
+        .await
 }
 
 async fn update_model_setting(user_vm: &UserVm, state: &AppState, model: &str) -> Result<()> {
     // Model-only update: read current settings, patch the model field, write back
-    let raw = get_vm_settings_raw(
-        user_vm.guest_ip,
-        &state.config.ssh_key_path,
-        &state.config.ssh_user,
-        &state.config.vm_host_key_path,
-    )
-    .await?;
+    let raw = state
+        .vm_config_ops
+        .get_settings_raw(user_vm.guest_ip)
+        .await?;
     let mut settings: serde_json::Value =
         serde_json::from_str(raw.trim()).context("failed to parse settings JSON")?;
     settings["model"] = serde_json::Value::String(model.to_owned());
     let content = settings.to_string();
-    set_vm_settings(
-        user_vm.guest_ip,
-        &state.config.ssh_key_path,
-        &state.config.ssh_user,
-        &state.config.vm_host_key_path,
-        &content,
-    )
-    .await
+    state
+        .vm_config_ops
+        .set_settings(user_vm.guest_ip, &content)
+        .await
 }
 
 #[cfg(test)]
@@ -255,5 +236,91 @@ mod tests {
     #[test]
     fn invalid_api_key_with_tab() {
         assert!(!is_valid_api_key("sk\tant"));
+    }
+
+    // ── handler integration tests ─────────────────────────────────────
+
+    use axum::extract::State;
+    use std::net::Ipv4Addr;
+    use std::sync::Arc;
+    use uuid::Uuid;
+
+    use crate::handlers::UserVm;
+    use crate::test_helpers::{MockHttpClient, MockVmConfigOps, test_app_state};
+
+    fn test_user_vm() -> UserVm {
+        UserVm {
+            user_id: Uuid::nil(),
+            vm_id: "test-vm".into(),
+            guest_ip: Ipv4Addr::new(10, 0, 0, 1),
+        }
+    }
+
+    #[tokio::test]
+    async fn get_settings_bedrock_mode() {
+        let mock = Arc::new(MockVmConfigOps::new("{}", "{}"));
+        let mut state = test_app_state(mock, Arc::new(MockHttpClient::empty()));
+        state.config.use_iam_creds = true;
+        let resp = get_settings_handler(test_user_vm(), State(state))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn get_settings_with_api_key() {
+        let settings = r#"{"env":{"ANTHROPIC_AUTH_TOKEN":"sk-test-123"}}"#;
+        let mock = Arc::new(MockVmConfigOps::new("{}", settings));
+        let state = test_app_state(mock, Arc::new(MockHttpClient::empty()));
+        let resp = get_settings_handler(test_user_vm(), State(state))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn put_settings_rejects_invalid_model() {
+        let mock = Arc::new(MockVmConfigOps::new("{}", "{}"));
+        let state = test_app_state(mock, Arc::new(MockHttpClient::empty()));
+        let body = SetSettingsBody {
+            api_key: None,
+            model: Some("bad;model".into()),
+        };
+        let resp = put_settings_handler(test_user_vm(), State(state), Json(body))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn put_settings_rejects_invalid_api_key() {
+        let mock = Arc::new(MockVmConfigOps::new("{}", "{}"));
+        let state = test_app_state(mock, Arc::new(MockHttpClient::empty()));
+        let body = SetSettingsBody {
+            api_key: Some("key\ninjection".into()),
+            model: None,
+        };
+        let resp = put_settings_handler(test_user_vm(), State(state), Json(body))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn put_settings_updates_model() {
+        let settings = r#"{"env":{}}"#;
+        let mock = Arc::new(MockVmConfigOps::new("{}", settings));
+        let state = test_app_state(mock.clone(), Arc::new(MockHttpClient::empty()));
+        let body = SetSettingsBody {
+            api_key: None,
+            model: Some("claude-3-opus".into()),
+        };
+        let resp = put_settings_handler(test_user_vm(), State(state), Json(body))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let written = mock.settings_json.lock().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&written).unwrap();
+        assert_eq!(parsed["model"], "claude-3-opus");
     }
 }

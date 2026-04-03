@@ -2819,5 +2819,55 @@ class TestLoadMcpServersOAuth(unittest.TestCase):
             agent.MCP_SERVERS = original
 
 
+class TestSlashCommandRouting(unittest.IsolatedAsyncioTestCase):
+    """Slash commands (e.g. /commit) are sent via build_prompt_stream like
+    regular messages — the SDK's internal CLI subprocess handles parsing.
+    The key requirement is that allowed_tools includes 'Skill' and
+    setting_sources includes 'project' so the SDK can discover skills."""
+
+    async def _capture_prompt(self, content: str) -> list[dict]:
+        """Run run_query and capture what was passed to the mock query()."""
+        captured_items: list[dict] = []
+
+        async def spy_query(prompt, options):
+            async for item in prompt:
+                captured_items.append(item)
+            return
+            yield  # make it an async generator
+
+        old_mods = _install_sdk_mock(custom_query=spy_query)
+        task_id = f"slash-{content[:10]}"
+        writer = MockWriter()
+        agent._sessions[task_id] = agent.Session(
+            task=asyncio.current_task(), writer=writer, conversation_id=""
+        )
+        token1 = agent._emit_writer.set(writer)
+        token2 = agent._emit_session_id.set(task_id)
+        try:
+            await agent.run_query(content, None, task_id, "", "/root")
+        finally:
+            _restore_sdk_mock(old_mods)
+            agent._emit_writer.reset(token1)
+            agent._emit_session_id.reset(token2)
+            agent._sessions.pop(task_id, None)
+        return captured_items
+
+    async def test_slash_command_sent_via_async_iterable(self):
+        """Slash commands go through build_prompt_stream for SDK compatibility."""
+        items = await self._capture_prompt("/commit")
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["message"]["content"], "/commit")
+        self.assertEqual(items[0]["type"], "user")
+
+    async def test_slash_command_with_args(self):
+        items = await self._capture_prompt("/compact summarize briefly")
+        self.assertEqual(items[0]["message"]["content"], "/compact summarize briefly")
+
+    async def test_regular_message_sent_via_async_iterable(self):
+        items = await self._capture_prompt("hello world")
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["message"]["content"], "hello world")
+
+
 if __name__ == "__main__":
     unittest.main()

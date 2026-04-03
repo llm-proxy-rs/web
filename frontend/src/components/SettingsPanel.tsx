@@ -546,6 +546,16 @@ function McpServersSection({
     }
   }, [formUrl, csrfFetch]);
 
+  // Debounced auto-detection when URL changes
+  useEffect(() => {
+    const url = formUrl.trim();
+    if (!url) return;
+    const timer = setTimeout(() => {
+      handleDetectAuth();
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [formUrl, handleDetectAuth]);
+
   const handleAutoRegister = useCallback(async () => {
     if (!oauthMetadata?.registration_endpoint) return;
     setRegistering(true);

@@ -6,11 +6,11 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use chat_settings::{get_vm_claude_json_raw, set_vm_claude_json, upsert_mcp_server};
+use chat_settings::upsert_mcp_server;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{net::Ipv4Addr, time::Duration};
+use std::net::Ipv4Addr;
 use subtle::ConstantTimeEq;
 use tower_sessions::Session;
 use tracing::{error, info};
@@ -20,6 +20,21 @@ use crate::{
     handlers::UserVm,
     state::{AppError, AppState},
 };
+
+/// Session data persisted between the OAuth start and callback requests.
+#[derive(Serialize, Deserialize)]
+struct McpOAuthSession {
+    state: String,
+    pkce_verifier: String,
+    token_endpoint: String,
+    client_id: String,
+    client_secret: Option<String>,
+    mcp_url: String,
+    redirect_uri: String,
+    server_name: String,
+}
+
+const MCP_OAUTH_SESSION_KEY: &str = "mcp_oauth";
 
 // ── PKCE helpers ─────────────────────────────────────────────────────────
 
@@ -203,16 +218,13 @@ struct TokenResponse {
 /// Probe an MCP server for OAuth authorization server metadata.
 /// Follows the MCP spec: RFC 9728 (protected resource) then RFC 8414 (auth server).
 pub(crate) async fn discover_handler(
+    _user_vm: UserVm,
+    State(state): State<AppState>,
     Query(query): Query<DiscoverQuery>,
 ) -> Result<Response, AppError> {
     if !is_safe_url(&query.url) {
         return Ok((StatusCode::BAD_REQUEST, "Invalid URL").into_response());
     }
-
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .context("failed to build HTTP client")?;
 
     // ── Step 1: Protected Resource Discovery (RFC 9728) ──────────────────
     // Discover which authorization server protects this MCP resource.
@@ -224,10 +236,9 @@ pub(crate) async fn discover_handler(
     let mut auth_server_url: Option<String> = None;
     for url in &protected_resource_urls {
         info!("mcp oauth discover: trying protected resource metadata at {url}");
-        if let Ok(resp) = client.get(url).send().await {
-            let status = resp.status();
-            if status.is_success() {
-                if let Ok(meta) = resp.json::<ProtectedResourceMetadata>().await {
+        if let Ok(resp) = state.http_client.get(url).await {
+            if resp.is_success() {
+                if let Ok(meta) = resp.json::<ProtectedResourceMetadata>() {
                     info!(
                         "mcp oauth discover: found authorization_servers: {:?}",
                         meta.authorization_servers
@@ -240,7 +251,7 @@ pub(crate) async fn discover_handler(
                     }
                 }
             } else {
-                info!("mcp oauth discover: {url} returned {status}");
+                info!("mcp oauth discover: {url} returned {}", resp.status);
             }
         }
     }
@@ -260,10 +271,9 @@ pub(crate) async fn discover_handler(
 
     for url in &discovery_urls {
         info!("mcp oauth discover: trying auth server metadata at {url}");
-        if let Ok(resp) = client.get(url).send().await {
-            let status = resp.status();
-            if status.is_success() {
-                if let Ok(metadata) = resp.json::<OAuthMetadata>().await {
+        if let Ok(resp) = state.http_client.get(url).await {
+            if resp.is_success() {
+                if let Ok(metadata) = resp.json::<OAuthMetadata>() {
                     info!(
                         "mcp oauth discover: found metadata — auth={}, token={}, register={:?}",
                         metadata.authorization_endpoint,
@@ -277,7 +287,7 @@ pub(crate) async fn discover_handler(
                     .into_response());
                 }
             } else {
-                info!("mcp oauth discover: {url} returned {status}");
+                info!("mcp oauth discover: {url} returned {}", resp.status);
             }
         }
     }
@@ -292,15 +302,14 @@ pub(crate) async fn discover_handler(
 /// POST /api/mcp-servers/oauth-register
 ///
 /// Dynamic Client Registration per RFC 7591.
-pub(crate) async fn register_handler(Json(body): Json<RegisterBody>) -> Result<Response, AppError> {
+pub(crate) async fn register_handler(
+    _user_vm: UserVm,
+    State(state): State<AppState>,
+    Json(body): Json<RegisterBody>,
+) -> Result<Response, AppError> {
     if !is_safe_url(&body.registration_endpoint) {
         return Ok((StatusCode::BAD_REQUEST, "Invalid registration endpoint").into_response());
     }
-
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .context("failed to build HTTP client")?;
 
     // Pick token_endpoint_auth_method based on what the server supports.
     // Default to client_secret_post (most common for MCP servers like Figma).
@@ -335,28 +344,30 @@ pub(crate) async fn register_handler(Json(body): Json<RegisterBody>) -> Result<R
         body.registration_endpoint, auth_method, body.redirect_uri, body.scope
     );
 
-    let resp = client
-        .post(&body.registration_endpoint)
-        .header("Content-Type", "application/json")
-        .header("MCP-Protocol-Version", "2025-03-26")
-        .json(&reg_request)
-        .send()
+    let resp = state
+        .http_client
+        .post_json(
+            &body.registration_endpoint,
+            reg_request,
+            &[
+                ("Content-Type", "application/json"),
+                ("MCP-Protocol-Version", "2025-03-26"),
+            ],
+        )
         .await
         .context("registration request failed")?;
 
-    if !resp.status().is_success() {
-        let status = resp.status();
-        error!("mcp oauth registration failed: {status}");
+    if !resp.is_success() {
+        error!("mcp oauth registration failed: {}", resp.status);
         return Ok((
             StatusCode::BAD_GATEWAY,
-            format!("registration failed: {status}"),
+            format!("registration failed: {}", resp.status),
         )
             .into_response());
     }
 
     let reg_resp: RegisterResponse = resp
         .json()
-        .await
         .context("failed to parse registration response")?;
 
     Ok(Json(reg_resp).into_response())
@@ -366,11 +377,15 @@ pub(crate) async fn register_handler(Json(body): Json<RegisterBody>) -> Result<R
 ///
 /// Generate PKCE parameters, store state in session, return authorization URL.
 pub(crate) async fn start_handler(
+    _user_vm: UserVm,
     session: Session,
     Json(body): Json<OAuthStartBody>,
 ) -> Result<Response, AppError> {
     if !is_safe_url(&body.token_endpoint) {
         return Ok((StatusCode::BAD_REQUEST, "Invalid token endpoint").into_response());
+    }
+    if !is_safe_url(&body.authorization_endpoint) {
+        return Ok((StatusCode::BAD_REQUEST, "Invalid authorization endpoint").into_response());
     }
 
     let code_verifier = generate_code_verifier();
@@ -379,40 +394,20 @@ pub(crate) async fn start_handler(
 
     let redirect_uri = &body.redirect_uri;
 
+    let oauth_session = McpOAuthSession {
+        state: state.clone(),
+        pkce_verifier: code_verifier,
+        token_endpoint: body.token_endpoint.clone(),
+        client_id: body.client_id.clone(),
+        client_secret: body.client_secret.clone(),
+        mcp_url: body.mcp_url.clone(),
+        redirect_uri: redirect_uri.clone(),
+        server_name: body.server_name.clone(),
+    };
     session
-        .insert("mcp_oauth_state", &state)
+        .insert(MCP_OAUTH_SESSION_KEY, &oauth_session)
         .await
-        .context("failed to store mcp oauth state")?;
-    session
-        .insert("mcp_oauth_pkce_verifier", &code_verifier)
-        .await
-        .context("failed to store mcp oauth pkce verifier")?;
-    session
-        .insert("mcp_oauth_token_endpoint", &body.token_endpoint)
-        .await
-        .context("failed to store mcp oauth token endpoint")?;
-    session
-        .insert("mcp_oauth_client_id", &body.client_id)
-        .await
-        .context("failed to store mcp oauth client id")?;
-    if let Some(ref secret) = body.client_secret {
-        session
-            .insert("mcp_oauth_client_secret", secret)
-            .await
-            .context("failed to store mcp oauth client secret")?;
-    }
-    session
-        .insert("mcp_oauth_mcp_url", &body.mcp_url)
-        .await
-        .context("failed to store mcp oauth mcp url")?;
-    session
-        .insert("mcp_oauth_redirect_uri", redirect_uri)
-        .await
-        .context("failed to store mcp oauth redirect uri")?;
-    session
-        .insert("mcp_oauth_server_name", &body.server_name)
-        .await
-        .context("failed to store mcp oauth server name")?;
+        .context("failed to store mcp oauth session")?;
 
     // Build authorization URL
     let mut auth_url =
@@ -441,99 +436,67 @@ pub(crate) async fn callback_handler(
     session: Session,
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
-    // Validate state nonce
-    let stored_state = session
-        .remove::<String>("mcp_oauth_state")
+    // Retrieve and remove all OAuth session data atomically
+    let oauth_session = session
+        .remove::<McpOAuthSession>(MCP_OAUTH_SESSION_KEY)
         .await
-        .context("failed to retrieve oauth state from session")?;
+        .context("failed to retrieve oauth session")?;
 
-    if !stored_state.as_deref().is_some_and(|s| {
-        s.len() == query.state.len() && s.as_bytes().ct_eq(query.state.as_bytes()).unwrap_u8() == 1
-    }) {
+    let Some(oauth_session) = oauth_session else {
+        error!("mcp oauth session missing");
+        return Ok(oauth_close_page("error", Some("state_mismatch")));
+    };
+
+    // Validate state nonce
+    if oauth_session.state.len() != query.state.len()
+        || oauth_session
+            .state
+            .as_bytes()
+            .ct_eq(query.state.as_bytes())
+            .unwrap_u8()
+            != 1
+    {
         error!("mcp oauth state mismatch");
         return Ok(oauth_close_page("error", Some("state_mismatch")));
     }
 
-    // Retrieve session data
-    let pkce_verifier = session
-        .remove::<String>("mcp_oauth_pkce_verifier")
-        .await
-        .context("failed to retrieve pkce verifier")?
-        .context("pkce verifier missing")?;
-    let token_endpoint = session
-        .remove::<String>("mcp_oauth_token_endpoint")
-        .await
-        .context("failed to retrieve token endpoint")?
-        .context("token endpoint missing")?;
-    let client_id = session
-        .remove::<String>("mcp_oauth_client_id")
-        .await
-        .context("failed to retrieve client id")?
-        .context("client id missing")?;
-    let client_secret = session
-        .remove::<String>("mcp_oauth_client_secret")
-        .await
-        .context("failed to retrieve client secret")?;
-    let mcp_url = session
-        .remove::<String>("mcp_oauth_mcp_url")
-        .await
-        .context("failed to retrieve mcp url")?
-        .context("mcp url missing")?;
-    let server_name = session
-        .remove::<String>("mcp_oauth_server_name")
-        .await
-        .context("failed to retrieve server name")?
-        .context("server name missing")?;
-    let redirect_uri = session
-        .remove::<String>("mcp_oauth_redirect_uri")
-        .await
-        .context("failed to retrieve redirect uri")?
-        .context("redirect uri missing")?;
-
     // Exchange authorization code for tokens
-    let http_client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(15))
-        .build()
-        .context("failed to build HTTP client")?;
-
     let mut token_params = vec![
         ("grant_type", "authorization_code".to_string()),
         ("code", query.code.clone()),
-        ("redirect_uri", redirect_uri),
-        ("code_verifier", pkce_verifier),
-        ("client_id", client_id),
+        ("redirect_uri", oauth_session.redirect_uri),
+        ("code_verifier", oauth_session.pkce_verifier),
+        ("client_id", oauth_session.client_id),
     ];
-    if let Some(secret) = client_secret {
+    if let Some(secret) = oauth_session.client_secret {
         token_params.push(("client_secret", secret));
     }
 
-    let token_resp = http_client
-        .post(&token_endpoint)
-        .form(&token_params)
-        .send()
+    let token_resp = state
+        .http_client
+        .post_form(&oauth_session.token_endpoint, &token_params)
         .await
         .context("token exchange request failed")?;
 
-    if !token_resp.status().is_success() {
+    if !token_resp.is_success() {
         error!("token exchange failed");
         return Ok(oauth_close_page("error", Some("token_exchange")));
     }
 
     let tokens: TokenResponse = token_resp
         .json()
-        .await
         .context("failed to parse token response")?;
 
-    info!("mcp oauth token exchange successful for server: {server_name}");
+    info!(
+        "mcp oauth token exchange successful for server: {}",
+        oauth_session.server_name
+    );
 
     // Read current ~/.claude.json from VM (UserVm extractor handles auth + VM provisioning)
-    let raw = match get_vm_claude_json_raw(
-        user_vm.guest_ip,
-        &state.config.ssh_key_path,
-        &state.config.ssh_user,
-        &state.config.vm_host_key_path,
-    )
-    .await
+    let raw = match state
+        .vm_config_ops
+        .get_claude_json_raw(user_vm.guest_ip)
+        .await
     {
         Ok(r) => r,
         Err(_) => {
@@ -550,14 +513,14 @@ pub(crate) async fn callback_handler(
             return Ok(oauth_close_page("error", Some("config_parse")));
         }
     };
-    if existing.contains_key(&server_name) {
+    if existing.contains_key(&oauth_session.server_name) {
         return Ok(oauth_close_page("error", Some("name_exists")));
     }
 
     // Build MCP server entry with OAuth token
     let mut server = serde_json::json!({
         "type": "http",
-        "url": mcp_url,
+        "url": oauth_session.mcp_url,
         "headers": {
             "Authorization": format!("Bearer {}", tokens.access_token),
         },
@@ -567,24 +530,23 @@ pub(crate) async fn callback_handler(
     }
 
     // Upsert and write back
-    let updated = upsert_mcp_server(raw.trim(), &server_name, server)
+    let updated = upsert_mcp_server(raw.trim(), &oauth_session.server_name, server)
         .context("failed to upsert MCP server config")?;
 
-    if set_vm_claude_json(
-        user_vm.guest_ip,
-        &state.config.ssh_key_path,
-        &state.config.ssh_user,
-        &state.config.vm_host_key_path,
-        &updated,
-    )
-    .await
-    .is_err()
+    if state
+        .vm_config_ops
+        .set_claude_json(user_vm.guest_ip, &updated)
+        .await
+        .is_err()
     {
         error!("mcp oauth callback: failed to write ~/.claude.json to VM");
         return Ok(oauth_close_page("error", Some("write_failed")));
     }
 
-    info!("mcp oauth: successfully wrote server '{server_name}' config to VM");
+    info!(
+        "mcp oauth: successfully wrote server '{}' config to VM",
+        oauth_session.server_name
+    );
 
     Ok(oauth_close_page("success", None))
 }
@@ -784,5 +746,263 @@ mod tests {
                 "https://localhost:8443/mcp/.well-known/openid-configuration",
             ]
         );
+    }
+
+    // ── McpOAuthSession serialization tests ────────────────────────────
+
+    #[test]
+    fn oauth_session_roundtrip() {
+        let session = McpOAuthSession {
+            state: "abc123".to_string(),
+            pkce_verifier: "verifier".to_string(),
+            token_endpoint: "https://auth.example.com/token".to_string(),
+            client_id: "client-1".to_string(),
+            client_secret: Some("secret".to_string()),
+            mcp_url: "https://mcp.example.com/v1".to_string(),
+            redirect_uri: "https://app.example.com/callback".to_string(),
+            server_name: "my-server".to_string(),
+        };
+        let json = serde_json::to_string(&session).unwrap();
+        let restored: McpOAuthSession = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.state, "abc123");
+        assert_eq!(restored.pkce_verifier, "verifier");
+        assert_eq!(restored.token_endpoint, "https://auth.example.com/token");
+        assert_eq!(restored.client_id, "client-1");
+        assert_eq!(restored.client_secret.as_deref(), Some("secret"));
+        assert_eq!(restored.mcp_url, "https://mcp.example.com/v1");
+        assert_eq!(restored.redirect_uri, "https://app.example.com/callback");
+        assert_eq!(restored.server_name, "my-server");
+    }
+
+    #[test]
+    fn oauth_session_roundtrip_no_secret() {
+        let session = McpOAuthSession {
+            state: "state".to_string(),
+            pkce_verifier: "verifier".to_string(),
+            token_endpoint: "https://auth.example.com/token".to_string(),
+            client_id: "client-1".to_string(),
+            client_secret: None,
+            mcp_url: "https://mcp.example.com".to_string(),
+            redirect_uri: "https://app.example.com/callback".to_string(),
+            server_name: "server".to_string(),
+        };
+        let json = serde_json::to_string(&session).unwrap();
+        let restored: McpOAuthSession = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.client_secret, None);
+    }
+
+    // ── is_safe_url tests ──────────────────────────────────────────────
+
+    #[test]
+    fn safe_url_accepts_valid_https() {
+        assert!(is_safe_url("https://example.com/token"));
+        assert!(is_safe_url("https://auth.example.com/oauth/token"));
+        // Public IP should be accepted
+        assert!(is_safe_url("https://8.8.8.8/token"));
+    }
+
+    #[test]
+    fn safe_url_rejects_private_ips() {
+        assert!(!is_safe_url("https://127.0.0.1/token"));
+        assert!(!is_safe_url("https://10.0.0.1/token"));
+        assert!(!is_safe_url("https://192.168.1.1/token"));
+    }
+
+    #[test]
+    fn safe_url_rejects_link_local_and_special_ips() {
+        assert!(!is_safe_url("https://169.254.1.1/token"));
+        assert!(!is_safe_url("https://169.254.169.254/token")); // AWS metadata
+        assert!(!is_safe_url("https://0.0.0.0/token"));
+        assert!(!is_safe_url("https://255.255.255.255/token"));
+    }
+
+    #[test]
+    fn safe_url_rejects_localhost_domain() {
+        assert!(!is_safe_url("https://localhost/token"));
+    }
+
+    #[test]
+    fn safe_url_rejects_ipv6_loopback_and_unspecified() {
+        assert!(!is_safe_url("https://[::1]/token"));
+        assert!(!is_safe_url("https://[::]/token"));
+    }
+
+    #[test]
+    fn safe_url_accepts_ipv6_public() {
+        assert!(is_safe_url("https://[2607:f8b0:4004:800::200e]/token"));
+    }
+
+    #[test]
+    fn safe_url_rejects_non_https() {
+        assert!(!is_safe_url("http://example.com/token"));
+        assert!(!is_safe_url("ftp://example.com/token"));
+    }
+
+    #[test]
+    fn safe_url_rejects_invalid() {
+        assert!(!is_safe_url("not-a-url"));
+        assert!(!is_safe_url(""));
+    }
+
+    // ── handler integration tests ─────────────────────────────────────
+
+    use axum::extract::State;
+    use std::sync::Arc;
+    use uuid::Uuid;
+
+    use crate::handlers::UserVm;
+    use crate::http_client::HttpResponse as MockHttpResponse;
+    use crate::test_helpers::{MockHttpClient, MockVmConfigOps, test_app_state};
+
+    fn test_user_vm() -> UserVm {
+        UserVm {
+            user_id: Uuid::nil(),
+            vm_id: "test-vm".into(),
+            guest_ip: Ipv4Addr::new(10, 0, 0, 1),
+        }
+    }
+
+    fn mock_http_response(status: u16, body: &str) -> MockHttpResponse {
+        MockHttpResponse {
+            status: reqwest::StatusCode::from_u16(status).unwrap(),
+            body: bytes::Bytes::from(body.to_string()),
+        }
+    }
+
+    #[tokio::test]
+    async fn discover_rejects_unsafe_url() {
+        let mock = Arc::new(MockVmConfigOps::new("{}", "{}"));
+        let state = test_app_state(mock, Arc::new(MockHttpClient::empty()));
+        let query = Query(DiscoverQuery {
+            url: "http://localhost/mcp".into(),
+        });
+        let resp = discover_handler(test_user_vm(), State(state), query)
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn discover_finds_metadata() {
+        // Mock responses: protected resource returns auth server, then auth server returns metadata
+        let protected_resp = mock_http_response(
+            200,
+            r#"{"authorization_servers":["https://auth.example.com"]}"#,
+        );
+        let auth_metadata = mock_http_response(
+            200,
+            r#"{
+                "authorization_endpoint": "https://auth.example.com/authorize",
+                "token_endpoint": "https://auth.example.com/token"
+            }"#,
+        );
+        let http = Arc::new(MockHttpClient::new(vec![protected_resp, auth_metadata]));
+        let mock = Arc::new(MockVmConfigOps::new("{}", "{}"));
+        let state = test_app_state(mock, http);
+        let query = Query(DiscoverQuery {
+            url: "https://mcp.example.com/v1".into(),
+        });
+        let resp = discover_handler(test_user_vm(), State(state), query)
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn discover_no_oauth() {
+        // All discovery URLs return 404
+        let responses: Vec<MockHttpResponse> =
+            (0..5).map(|_| mock_http_response(404, "")).collect();
+        let http = Arc::new(MockHttpClient::new(responses));
+        let mock = Arc::new(MockVmConfigOps::new("{}", "{}"));
+        let state = test_app_state(mock, http);
+        let query = Query(DiscoverQuery {
+            url: "https://mcp.example.com/v1".into(),
+        });
+        let resp = discover_handler(test_user_vm(), State(state), query)
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn register_rejects_unsafe_endpoint() {
+        let mock = Arc::new(MockVmConfigOps::new("{}", "{}"));
+        let state = test_app_state(mock, Arc::new(MockHttpClient::empty()));
+        let body = Json(RegisterBody {
+            registration_endpoint: "https://10.0.0.1/register".into(),
+            client_name: "test".into(),
+            redirect_uri: "https://example.com/callback".into(),
+            scope: None,
+            token_endpoint_auth_methods_supported: None,
+        });
+        let resp = register_handler(test_user_vm(), State(state), body)
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn register_success() {
+        let reg_resp = mock_http_response(
+            200,
+            r#"{"client_id":"client-123","client_secret":"secret-456"}"#,
+        );
+        let http = Arc::new(MockHttpClient::new(vec![reg_resp]));
+        let mock = Arc::new(MockVmConfigOps::new("{}", "{}"));
+        let state = test_app_state(mock, http);
+        let body = Json(RegisterBody {
+            registration_endpoint: "https://auth.example.com/register".into(),
+            client_name: "test".into(),
+            redirect_uri: "https://example.com/callback".into(),
+            scope: None,
+            token_endpoint_auth_methods_supported: None,
+        });
+        let resp = register_handler(test_user_vm(), State(state), body)
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn start_rejects_unsafe_token_endpoint() {
+        let session = tower_sessions::Session::new(
+            None,
+            std::sync::Arc::new(tower_sessions::MemoryStore::default()),
+            None,
+        );
+        let body = Json(OAuthStartBody {
+            token_endpoint: "https://10.0.0.1/token".into(),
+            authorization_endpoint: "https://auth.example.com/authorize".into(),
+            client_id: "client-1".into(),
+            client_secret: None,
+            redirect_uri: "https://example.com/callback".into(),
+            mcp_url: "https://mcp.example.com".into(),
+            server_name: "test".into(),
+            scopes: None,
+        });
+        let resp = start_handler(test_user_vm(), session, body).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn start_rejects_unsafe_authorization_endpoint() {
+        let session = tower_sessions::Session::new(
+            None,
+            std::sync::Arc::new(tower_sessions::MemoryStore::default()),
+            None,
+        );
+        let body = Json(OAuthStartBody {
+            token_endpoint: "https://auth.example.com/token".into(),
+            authorization_endpoint: "https://127.0.0.1/authorize".into(),
+            client_id: "client-1".into(),
+            client_secret: None,
+            redirect_uri: "https://example.com/callback".into(),
+            mcp_url: "https://mcp.example.com".into(),
+            server_name: "test".into(),
+            scopes: None,
+        });
+        let resp = start_handler(test_user_vm(), session, body).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 }

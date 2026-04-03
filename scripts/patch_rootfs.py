@@ -44,6 +44,7 @@ ROOTFS_DIR = REPO_ROOT / "rootfs"
 AGENT_PY = ROOTFS_DIR / "agent.py"
 AGENT_SERVICE = ROOTFS_DIR / "agent.service"
 CLAUDE_UPDATE_SERVICE = ROOTFS_DIR / "claude-update.service"
+SKILLS_DIR = ROOTFS_DIR / "skills"
 INSTALL_DIR = Path("/var/lib/fc")
 
 
@@ -164,6 +165,15 @@ def patch_one(rootfs_path: Path, mcp_base_url: str | None, dry_run: bool) -> Non
 
         # Patch SSH keys
         patch_ssh_keys(mountpoint)
+
+        # Install built-in skills (/commit, /review, etc.)
+        if SKILLS_DIR.is_dir():
+            skills_dest = mountpoint / "home/ubuntu/.claude/skills"
+            if skills_dest.exists():
+                shutil.rmtree(str(skills_dest))
+            shutil.copytree(str(SKILLS_DIR), str(skills_dest))
+            run(["chown", "-R", "1000:1000", str(mountpoint / "home/ubuntu/.claude")])
+            print(f"  installed {len(list(SKILLS_DIR.iterdir()))} skill(s)")
 
         # Patch MCP proxy service
         if mcp_base_url:

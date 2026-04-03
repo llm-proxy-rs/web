@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.14"
-# dependencies = ["claude-agent-sdk>=0.1.50"]
+# dependencies = ["claude-agent-sdk>=0.1.52"]
 # ///
 import asyncio
 import contextvars

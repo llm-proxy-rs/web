@@ -10,10 +10,35 @@
   var ch = new BroadcastChannel("mcp_oauth");
   ch.postMessage(msg);
   ch.close();
-  // Clean URL and show close message
+  // Clean URL
   window.history.replaceState({}, "", "/");
-  document.getElementById("status").textContent =
-    "OAuth complete. You can close this window.";
-  document.getElementById("close-btn").style.display = "inline-block";
+  // Update UI based on result
+  var isSuccess = result === "success";
+  var icon = document.getElementById("icon");
+  var iconCheck = document.getElementById("icon-check");
+  var iconX = document.getElementById("icon-x");
+  var status = document.getElementById("status");
+  var detail = document.getElementById("detail");
+  var closeBtn = document.getElementById("close-btn");
+  if (!isSuccess && icon) {
+    icon.className = "icon icon-error";
+    if (iconCheck) iconCheck.style.display = "none";
+    if (iconX) iconX.style.display = "block";
+  }
+  if (status) {
+    status.textContent = isSuccess
+      ? "Authorization successful"
+      : "Authorization failed";
+  }
+  if (detail) {
+    detail.textContent = isSuccess
+      ? "Your MCP server has been connected. This window will close automatically."
+      : reason
+        ? "Something went wrong (" +
+          reason.replace(/_/g, " ") +
+          "). You can close this window and try again."
+        : "Something went wrong. You can close this window and try again.";
+  }
+  if (closeBtn) closeBtn.style.display = "inline-block";
   window.close();
 })();
