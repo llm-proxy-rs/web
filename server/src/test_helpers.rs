@@ -122,7 +122,6 @@ pub(crate) fn test_app_state(
         config,
         sqlx::PgPool::connect_lazy("postgres://test:test@localhost/test")
             .expect("lazy pool creation should not fail"),
-        crate::static_files::StaticAssets::default(),
         vm_config_ops,
         http_client,
     )

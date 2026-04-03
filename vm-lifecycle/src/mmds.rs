@@ -5,10 +5,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{
-    VmRegistry,
-    iam::{HostIamCredential, fetch_host_iam_credentials},
-};
+use crate::VmRegistry;
+use crate::iam::{HostIamCredential, fetch_host_iam_credentials};
 
 pub async fn refresh_all_vm_mmds(
     vms: &VmRegistry,

@@ -275,6 +275,27 @@ async fn write_bedrock_settings(state: &AppState, guest_ip: Ipv4Addr) -> Result<
     .await
 }
 
+async fn retry_write_settings(
+    state: &AppState,
+    ip: Ipv4Addr,
+    gateway_key: &Option<String>,
+) -> Result<()> {
+    for attempt in 0..15 {
+        let result = if let Some(key) = gateway_key {
+            write_gateway_settings_with_key(state, ip, key).await
+        } else {
+            write_bedrock_settings(state, ip).await
+        };
+        if result.is_ok() {
+            return Ok(());
+        }
+        if attempt < 14 {
+            tokio::time::sleep(Duration::from_secs(3)).await;
+        }
+    }
+    Err(anyhow!("failed to write VM settings after 15 attempts"))
+}
+
 fn remove_user_vm(vms: &VmRegistry, user_id: Uuid) -> Result<()> {
     let _removed = {
         let mut registry = vms
@@ -353,26 +374,12 @@ pub(crate) async fn vm_status_handler(
                 // Write settings before registering so the VM is not visible
                 // as "ready" until the API key / bedrock config is in place.
                 // Retry with a total timeout — the VM needs time to boot SSH.
-                let settings_result =
-                    tokio::time::timeout(tokio::time::Duration::from_secs(90), async {
-                        for attempt in 0..15 {
-                            let result = if let Some(ref key) = gateway_key {
-                                write_gateway_settings_with_key(&state_clone, new_vm.guest_ip, key)
-                                    .await
-                            } else {
-                                write_bedrock_settings(&state_clone, new_vm.guest_ip).await
-                            };
-                            if result.is_ok() {
-                                return Ok(());
-                            }
-                            if attempt < 14 {
-                                tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-                            }
-                        }
-                        Err(())
-                    })
-                    .await;
-                if settings_result.is_err() || matches!(settings_result, Ok(Err(()))) {
+                let settings_result = timeout(
+                    Duration::from_secs(90),
+                    retry_write_settings(&state_clone, new_vm.guest_ip, &gateway_key),
+                )
+                .await;
+                if !matches!(settings_result, Ok(Ok(()))) {
                     error!("timed out or failed writing VM settings, registering VM anyway");
                 }
                 if register_vm(

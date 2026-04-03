@@ -5,33 +5,14 @@ use axum::{
     http::{StatusCode, header},
     response::{IntoResponse, Response},
 };
-use std::path::{self, PathBuf};
+use std::path;
 use tokio::fs::File;
 use tokio_util::io::ReaderStream;
 
 use crate::state::{AppError, AppState};
 
-#[derive(Default)]
-pub(crate) struct StaticAssets {
-    pub(crate) app_js_path: PathBuf,
-    pub(crate) styles_css_path: PathBuf,
-    pub(crate) fonts_dir: PathBuf,
-}
-
-pub(crate) fn load_static_assets(static_dir: &path::Path) -> anyhow::Result<StaticAssets> {
-    let fonts_dir = static_dir.join("fonts");
-    let fonts_dir = fonts_dir
-        .canonicalize()
-        .context("fonts directory does not exist")?;
-    Ok(StaticAssets {
-        app_js_path: static_dir.join("app.js"),
-        styles_css_path: static_dir.join("styles.css"),
-        fonts_dir,
-    })
-}
-
 pub(crate) async fn serve_app_js(State(state): State<AppState>) -> Result<Response, AppError> {
-    let file = File::open(&state.static_assets.app_js_path)
+    let file = File::open(state.config.static_dir.join("app.js"))
         .await
         .context("failed to open app.js")?;
     let body = Body::from_stream(ReaderStream::new(file));
@@ -49,7 +30,7 @@ pub(crate) async fn serve_app_js(State(state): State<AppState>) -> Result<Respon
 }
 
 pub(crate) async fn serve_styles_css(State(state): State<AppState>) -> Result<Response, AppError> {
-    let file = File::open(&state.static_assets.styles_css_path)
+    let file = File::open(state.config.static_dir.join("styles.css"))
         .await
         .context("failed to open styles.css")?;
     let body = Body::from_stream(ReaderStream::new(file));
@@ -64,13 +45,7 @@ pub(crate) async fn serve_styles_css(State(state): State<AppState>) -> Result<Re
 }
 
 pub(crate) async fn serve_oauth_close(State(state): State<AppState>) -> Result<Response, AppError> {
-    let js_path = state
-        .static_assets
-        .app_js_path
-        .parent()
-        .context("invalid static dir")?
-        .join("oauth-close.js");
-    let file = File::open(&js_path)
+    let file = File::open(state.config.static_dir.join("oauth-close.js"))
         .await
         .context("failed to open oauth-close.js")?;
     let body = Body::from_stream(ReaderStream::new(file));
@@ -196,12 +171,17 @@ pub(crate) async fn serve_font(
     {
         return Ok(StatusCode::NOT_FOUND.into_response());
     }
-    let font_path = state.static_assets.fonts_dir.join(file_path);
+    let fonts_dir = state.config.static_dir.join("fonts");
+    let fonts_dir = match fonts_dir.canonicalize() {
+        Ok(p) => p,
+        Err(_) => return Ok(StatusCode::NOT_FOUND.into_response()),
+    };
+    let font_path = fonts_dir.join(file_path);
     let font_path = match font_path.canonicalize() {
         Ok(p) => p,
         Err(_) => return Ok(StatusCode::NOT_FOUND.into_response()),
     };
-    if !font_path.starts_with(&state.static_assets.fonts_dir) {
+    if !font_path.starts_with(&fonts_dir) {
         return Ok(StatusCode::NOT_FOUND.into_response());
     }
     let file = match File::open(&font_path).await {

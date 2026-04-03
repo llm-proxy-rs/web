@@ -74,8 +74,7 @@ use crate::{
     },
     state::{AppState, load_config},
     static_files::{
-        load_static_assets, render_oauth_close_page, serve_app_js, serve_font, serve_oauth_close,
-        serve_styles_css,
+        render_oauth_close_page, serve_app_js, serve_font, serve_oauth_close, serve_styles_css,
     },
     terminal::handle_ws_upgrade,
     upload::upload_file_handler,
@@ -90,7 +89,6 @@ async fn main() -> Result<()> {
         )
         .init();
     let app_config = load_config()?;
-    let static_assets = load_static_assets(&app_config.static_dir)?;
     let pg_pool = store::connect_db(&app_config.database_url).await?;
     store::run_migrations(&pg_pool).await?;
     let session_store_handle = create_session_store(pg_pool.clone()).await?;
@@ -104,13 +102,7 @@ async fn main() -> Result<()> {
         http_client::ReqwestHttpClient::new(std::time::Duration::from_secs(15))
             .expect("failed to build HTTP client"),
     );
-    let app_state = AppState::new(
-        app_config,
-        pg_pool,
-        static_assets,
-        vm_config_ops,
-        http_client,
-    );
+    let app_state = AppState::new(app_config, pg_pool, vm_config_ops, http_client);
     let port = app_state.config.port;
     clean_stale_vms(
         &app_state.config.net_helper_path,

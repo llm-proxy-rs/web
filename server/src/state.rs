@@ -18,7 +18,6 @@ use uuid::Uuid;
 use vm_lifecycle::{VmBuildConfig, VmRegistry};
 
 use crate::http_client::HttpClient;
-use crate::static_files::StaticAssets;
 
 #[derive(Clone, Deserialize)]
 pub(crate) struct AppConfig {
@@ -209,7 +208,6 @@ pub(crate) struct AppState {
     pub(crate) db: PgPool,
     pub(crate) vms: VmRegistry,
     pub(crate) provisioning_users: Arc<Mutex<HashSet<Uuid>>>,
-    pub(crate) static_assets: Arc<StaticAssets>,
     pub(crate) vm_config_ops: Arc<dyn chat_settings::VmConfigOps>,
     pub(crate) http_client: Arc<dyn HttpClient>,
 }
@@ -218,7 +216,6 @@ impl AppState {
     pub(crate) fn new(
         config: AppConfig,
         pg_pool: PgPool,
-        static_assets: StaticAssets,
         vm_config_ops: Arc<dyn chat_settings::VmConfigOps>,
         http_client: Arc<dyn HttpClient>,
     ) -> Self {
@@ -227,7 +224,6 @@ impl AppState {
             db: pg_pool,
             vms: Arc::new(Mutex::new(HashMap::new())),
             provisioning_users: Arc::new(Mutex::new(HashSet::new())),
-            static_assets: Arc::new(static_assets),
             vm_config_ops,
             http_client,
         }
