@@ -17,6 +17,7 @@ const GET_CLAUDE_JSON_CMD: &str = "cat ~/.claude.json 2>/dev/null || echo '{}'";
 const SET_CLAUDE_JSON_CMD: &str = "cat > ~/.claude.json";
 const CHANNEL_SEND_TIMEOUT_SECS: u64 = 30;
 const CHANNEL_WAIT_TIMEOUT_SECS: u64 = 30;
+const TOTAL_OP_TIMEOUT_SECS: u64 = 60;
 
 /// Abstraction over VM config file operations (read/write ~/.claude.json and ~/.claude/settings.json).
 #[async_trait]
@@ -99,14 +100,18 @@ impl VmConfigOps for SshVmConfigOps {
         .await
     }
     async fn write_file(&self, guest_ip: Ipv4Addr, cmd: &str, content: &str) -> Result<()> {
-        let mut ssh_handle = connect_ssh(
-            guest_ip,
-            &self.ssh_key_path,
-            &self.ssh_user,
-            &self.vm_host_key_path,
-        )
-        .await?;
-        write_file_via_ssh(&mut ssh_handle, cmd, content).await
+        timeout(Duration::from_secs(TOTAL_OP_TIMEOUT_SECS), async {
+            let mut ssh_handle = connect_ssh(
+                guest_ip,
+                &self.ssh_key_path,
+                &self.ssh_user,
+                &self.vm_host_key_path,
+            )
+            .await?;
+            write_file_via_ssh_unbounded(&mut ssh_handle, cmd, content).await
+        })
+        .await
+        .context("write_file timed out")?
     }
 }
 
@@ -160,17 +165,32 @@ pub fn build_bedrock_settings_json(
     serde_json::to_string_pretty(&settings).context("settings serialization failed")
 }
 
+pub async fn get_vm_settings_unbounded(
+    guest_ip: Ipv4Addr,
+    ssh_key_path: &Path,
+    ssh_user: &str,
+    vm_host_key_path: &Path,
+) -> Result<VmSettings> {
+    let raw =
+        get_vm_settings_raw_unbounded(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
+    parse_vm_settings(raw.trim())
+}
+
 pub async fn get_vm_settings(
     guest_ip: Ipv4Addr,
     ssh_key_path: &Path,
     ssh_user: &str,
     vm_host_key_path: &Path,
 ) -> Result<VmSettings> {
-    let raw = get_vm_settings_raw(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
-    parse_vm_settings(raw.trim())
+    timeout(
+        Duration::from_secs(TOTAL_OP_TIMEOUT_SECS),
+        get_vm_settings_unbounded(guest_ip, ssh_key_path, ssh_user, vm_host_key_path),
+    )
+    .await
+    .context("get_vm_settings timed out")?
 }
 
-pub async fn get_vm_settings_raw(
+pub async fn get_vm_settings_raw_unbounded(
     guest_ip: Ipv4Addr,
     ssh_key_path: &Path,
     ssh_user: &str,
@@ -179,6 +199,7 @@ pub async fn get_vm_settings_raw(
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
     let mut channel = open_exec_channel(&mut ssh_handle, GET_SETTINGS_CMD).await?;
     let mut stdout = String::new();
+    // No total timeout — callers must wrap in their own timeout.
     loop {
         match timeout(
             Duration::from_secs(CHANNEL_WAIT_TIMEOUT_SECS),
@@ -195,6 +216,20 @@ pub async fn get_vm_settings_raw(
         }
     }
     Ok(stdout)
+}
+
+pub async fn get_vm_settings_raw(
+    guest_ip: Ipv4Addr,
+    ssh_key_path: &Path,
+    ssh_user: &str,
+    vm_host_key_path: &Path,
+) -> Result<String> {
+    timeout(
+        Duration::from_secs(TOTAL_OP_TIMEOUT_SECS),
+        get_vm_settings_raw_unbounded(guest_ip, ssh_key_path, ssh_user, vm_host_key_path),
+    )
+    .await
+    .context("get_vm_settings_raw timed out")?
 }
 
 fn parse_vm_settings(stdout: &str) -> Result<VmSettings> {
@@ -213,7 +248,7 @@ fn parse_vm_settings(stdout: &str) -> Result<VmSettings> {
     })
 }
 
-pub async fn set_vm_settings(
+pub async fn set_vm_settings_unbounded(
     guest_ip: Ipv4Addr,
     ssh_key_path: &Path,
     ssh_user: &str,
@@ -221,10 +256,25 @@ pub async fn set_vm_settings(
     content: &str,
 ) -> Result<()> {
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
-    write_file_via_ssh(&mut ssh_handle, SET_SETTINGS_CMD, content).await
+    write_file_via_ssh_unbounded(&mut ssh_handle, SET_SETTINGS_CMD, content).await
 }
 
-pub async fn get_vm_claude_json_raw(
+pub async fn set_vm_settings(
+    guest_ip: Ipv4Addr,
+    ssh_key_path: &Path,
+    ssh_user: &str,
+    vm_host_key_path: &Path,
+    content: &str,
+) -> Result<()> {
+    timeout(
+        Duration::from_secs(TOTAL_OP_TIMEOUT_SECS),
+        set_vm_settings_unbounded(guest_ip, ssh_key_path, ssh_user, vm_host_key_path, content),
+    )
+    .await
+    .context("set_vm_settings timed out")?
+}
+
+pub async fn get_vm_claude_json_raw_unbounded(
     guest_ip: Ipv4Addr,
     ssh_key_path: &Path,
     ssh_user: &str,
@@ -233,6 +283,7 @@ pub async fn get_vm_claude_json_raw(
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
     let mut channel = open_exec_channel(&mut ssh_handle, GET_CLAUDE_JSON_CMD).await?;
     let mut stdout = String::new();
+    // No total timeout — callers must wrap in their own timeout.
     loop {
         match timeout(
             Duration::from_secs(CHANNEL_WAIT_TIMEOUT_SECS),
@@ -251,7 +302,21 @@ pub async fn get_vm_claude_json_raw(
     Ok(stdout)
 }
 
-pub async fn set_vm_claude_json(
+pub async fn get_vm_claude_json_raw(
+    guest_ip: Ipv4Addr,
+    ssh_key_path: &Path,
+    ssh_user: &str,
+    vm_host_key_path: &Path,
+) -> Result<String> {
+    timeout(
+        Duration::from_secs(TOTAL_OP_TIMEOUT_SECS),
+        get_vm_claude_json_raw_unbounded(guest_ip, ssh_key_path, ssh_user, vm_host_key_path),
+    )
+    .await
+    .context("get_vm_claude_json_raw timed out")?
+}
+
+pub async fn set_vm_claude_json_unbounded(
     guest_ip: Ipv4Addr,
     ssh_key_path: &Path,
     ssh_user: &str,
@@ -259,7 +324,22 @@ pub async fn set_vm_claude_json(
     content: &str,
 ) -> Result<()> {
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
-    write_file_via_ssh(&mut ssh_handle, SET_CLAUDE_JSON_CMD, content).await
+    write_file_via_ssh_unbounded(&mut ssh_handle, SET_CLAUDE_JSON_CMD, content).await
+}
+
+pub async fn set_vm_claude_json(
+    guest_ip: Ipv4Addr,
+    ssh_key_path: &Path,
+    ssh_user: &str,
+    vm_host_key_path: &Path,
+    content: &str,
+) -> Result<()> {
+    timeout(
+        Duration::from_secs(TOTAL_OP_TIMEOUT_SECS),
+        set_vm_claude_json_unbounded(guest_ip, ssh_key_path, ssh_user, vm_host_key_path, content),
+    )
+    .await
+    .context("set_vm_claude_json timed out")?
 }
 
 /// Extract the `mcpServers` map from raw `~/.claude.json` content.
@@ -309,7 +389,7 @@ pub fn remove_mcp_server(raw: &str, name: &str) -> Result<Option<String>> {
         .map(Some)
 }
 
-async fn write_file_via_ssh(
+async fn write_file_via_ssh_unbounded(
     ssh_handle: &mut client::Handle<SshClient>,
     cmd: &str,
     content: &str,
@@ -329,6 +409,7 @@ async fn write_file_via_ssh(
     .await
     .context("SSH channel eof timed out")?
     .context("SSH channel eof failed")?;
+    // No total timeout — callers must wrap in their own timeout.
     loop {
         match timeout(
             Duration::from_secs(CHANNEL_WAIT_TIMEOUT_SECS),
@@ -345,7 +426,7 @@ async fn write_file_via_ssh(
 }
 
 /// Generic SSH command execution - runs a command and returns stdout.
-pub async fn exec_ssh_command(
+pub async fn exec_ssh_command_unbounded(
     guest_ip: Ipv4Addr,
     ssh_key_path: &Path,
     ssh_user: &str,
@@ -355,6 +436,7 @@ pub async fn exec_ssh_command(
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
     let mut channel = open_exec_channel(&mut ssh_handle, cmd).await?;
     let mut stdout = String::new();
+    // No total timeout — callers must wrap in their own timeout.
     loop {
         match timeout(
             Duration::from_secs(CHANNEL_WAIT_TIMEOUT_SECS),
@@ -371,6 +453,21 @@ pub async fn exec_ssh_command(
         }
     }
     Ok(stdout)
+}
+
+pub async fn exec_ssh_command(
+    guest_ip: Ipv4Addr,
+    ssh_key_path: &Path,
+    ssh_user: &str,
+    vm_host_key_path: &Path,
+    cmd: &str,
+) -> Result<String> {
+    timeout(
+        Duration::from_secs(TOTAL_OP_TIMEOUT_SECS),
+        exec_ssh_command_unbounded(guest_ip, ssh_key_path, ssh_user, vm_host_key_path, cmd),
+    )
+    .await
+    .context("exec_ssh_command timed out")?
 }
 
 #[cfg(test)]

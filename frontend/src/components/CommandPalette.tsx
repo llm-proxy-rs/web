@@ -11,7 +11,6 @@ const COMMANDS: SlashCommand[] = [
   { name: "review", label: "/review", description: "Review code changes" },
   { name: "diff", label: "/diff", description: "Show git diff" },
   { name: "compact", label: "/compact", description: "Compress context" },
-  { name: "memory", label: "/memory", description: "Manage persistent memory" },
   { name: "plan", label: "/plan", description: "Enter plan mode" },
 ];
 

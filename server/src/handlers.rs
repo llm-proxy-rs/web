@@ -218,14 +218,7 @@ async fn write_initial_settings(
         None => return write_bedrock_settings(state, guest_ip).await,
     };
 
-    chat_settings::set_vm_settings(
-        guest_ip,
-        &state.config.ssh_key_path,
-        &state.config.ssh_user,
-        &state.config.vm_host_key_path,
-        &content,
-    )
-    .await
+    state.vm_config_ops.set_settings(guest_ip, &content).await
 }
 
 /// Best-effort write of gateway API key settings to a VM using a pre-extracted key.
@@ -243,14 +236,7 @@ async fn write_gateway_settings_with_key(
         &state.config.anthropic_default_sonnet_model,
         &state.config.anthropic_default_opus_model,
     )?;
-    chat_settings::set_vm_settings(
-        guest_ip,
-        &state.config.ssh_key_path,
-        &state.config.ssh_user,
-        &state.config.vm_host_key_path,
-        &content,
-    )
-    .await
+    state.vm_config_ops.set_settings(guest_ip, &content).await
 }
 
 /// Best-effort write of Bedrock default settings to a VM.
@@ -265,14 +251,7 @@ async fn write_bedrock_settings(state: &AppState, guest_ip: Ipv4Addr) -> Result<
         &state.config.anthropic_default_sonnet_model,
         &state.config.anthropic_default_opus_model,
     )?;
-    chat_settings::set_vm_settings(
-        guest_ip,
-        &state.config.ssh_key_path,
-        &state.config.ssh_user,
-        &state.config.vm_host_key_path,
-        &content,
-    )
-    .await
+    state.vm_config_ops.set_settings(guest_ip, &content).await
 }
 
 async fn retry_write_settings(

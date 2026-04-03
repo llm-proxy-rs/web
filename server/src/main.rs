@@ -9,7 +9,6 @@ mod handlers;
 mod http_client;
 mod mcp;
 mod mcp_oauth;
-mod memory;
 mod settings;
 mod skills;
 mod state;
@@ -66,7 +65,6 @@ use crate::{
         discover_handler as mcp_oauth_discover_handler,
         register_handler as mcp_oauth_register_handler, start_handler as mcp_oauth_start_handler,
     },
-    memory::get_memory_handler,
     settings::{get_settings_handler, put_settings_handler},
     skills::{
         create_handler as skills_create_handler, delete_handler as skills_delete_handler,
@@ -211,7 +209,6 @@ fn build_router(app_state: AppState, session_store: PostgresStore) -> Router {
         )
         .route("/api/vm-status", get(vm_status_handler))
         .route("/api/csrf-token", get(get_csrf_token_handler))
-        .route("/api/memory", get(get_memory_handler))
         .route(
             "/api/skills",
             get(skills_list_handler).post(skills_create_handler),
