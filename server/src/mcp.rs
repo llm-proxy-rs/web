@@ -222,7 +222,7 @@ mod tests {
         assert!(is_valid_url("https://example.com/mcp/"));
         assert!(is_valid_url("https://example.com"));
         assert!(is_valid_url("http://localhost:8080/mcp"));
-        assert!(is_valid_url("https://34.49.122.135/mcp"));
+        assert!(is_valid_url("https://192.0.2.1/mcp"));
     }
 
     #[test]

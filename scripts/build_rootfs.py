@@ -650,7 +650,7 @@ def main() -> None:
     parser.add_argument(
         "--mcp-base-url",
         default=None,
-        help="MCP server base URL for socat reverse proxy (e.g. https://34.49.122.135)",
+        help="MCP server base URL for socat reverse proxy (e.g. https://mcp.example.com)",
     )
     args = parser.parse_args()
 

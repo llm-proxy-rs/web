@@ -18,13 +18,13 @@ Options:
   --rootfs <path>         Patch a single rootfs image
   --chroot-base <path>    Patch all user rootfs images under the chroot base
                           (default: /srv/jailer)
-  --mcp-base-url <url>    Configure MCP proxy (e.g. https://34.49.122.135)
+  --mcp-base-url <url>    Configure MCP proxy (e.g. https://mcp.example.com)
   --dry-run               Show what would be patched without making changes
 
 Examples:
   sudo python3 scripts/patch_rootfs.py
   sudo python3 scripts/patch_rootfs.py --rootfs /srv/jailer/firecracker/<user-id>/root/rootfs.ext4
-  sudo python3 scripts/patch_rootfs.py --mcp-base-url https://34.49.122.135
+  sudo python3 scripts/patch_rootfs.py --mcp-base-url https://mcp.example.com
 """
 
 import argparse
