@@ -15,6 +15,20 @@ use crate::{
     state::{AppError, AppState},
 };
 
+#[derive(Deserialize)]
+struct McpServerValue {
+    #[serde(rename = "type", default = "default_mcp_type")]
+    type_: String,
+    #[serde(default)]
+    url: String,
+    #[serde(default)]
+    headers: HashMap<String, String>,
+}
+
+fn default_mcp_type() -> String {
+    "http".into()
+}
+
 #[derive(Serialize)]
 struct McpServerEntry {
     name: String,
@@ -82,32 +96,14 @@ pub(crate) async fn list_handler(
     let servers = parse_mcp_servers(raw.trim())?;
     let entries: Vec<McpServerEntry> = servers
         .into_iter()
-        .map(|(name, val)| {
-            let type_ = val
-                .get("type")
-                .and_then(|v| v.as_str())
-                .unwrap_or("http")
-                .to_string();
-            let url = val
-                .get("url")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let headers = val
-                .get("headers")
-                .and_then(|v| v.as_object())
-                .map(|obj| {
-                    obj.iter()
-                        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
-                        .collect()
-                })
-                .unwrap_or_default();
-            McpServerEntry {
+        .filter_map(|(name, val)| {
+            let server: McpServerValue = serde_json::from_value(val).ok()?;
+            Some(McpServerEntry {
                 name,
-                type_,
-                url,
-                headers,
-            }
+                type_: server.type_,
+                url: server.url,
+                headers: server.headers,
+            })
         })
         .collect();
     Ok(Json(entries).into_response())

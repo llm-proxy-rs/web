@@ -1,8 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
+use chat_settings::{VmConfigOps, VmSettings, parse_vm_settings};
 use std::{collections::VecDeque, net::Ipv4Addr, sync::Mutex};
-
-use chat_settings::{VmConfigOps, VmSettings};
 
 use crate::http_client::{HttpClient, HttpResponse};
 use crate::state::{AppConfig, AppState};
@@ -33,18 +32,7 @@ impl VmConfigOps for MockVmConfigOps {
     }
     async fn get_settings(&self, _guest_ip: Ipv4Addr) -> Result<VmSettings> {
         let raw = self.settings_json.lock().unwrap().clone();
-        let settings: serde_json::Value = serde_json::from_str(raw.trim())?;
-        let env = settings.get("env");
-        Ok(VmSettings {
-            has_api_key: env
-                .and_then(|v| v.get("ANTHROPIC_AUTH_TOKEN"))
-                .and_then(|v| v.as_str())
-                .is_some_and(|s| !s.is_empty()),
-            model: settings
-                .get("model")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string()),
-        })
+        parse_vm_settings(raw.trim())
     }
     async fn get_settings_raw(&self, _guest_ip: Ipv4Addr) -> Result<String> {
         Ok(self.settings_json.lock().unwrap().clone())

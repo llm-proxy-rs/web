@@ -874,6 +874,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "russh",
+ "serde",
  "serde_json",
  "ssh-client",
  "tokio",

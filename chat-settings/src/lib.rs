@@ -2,6 +2,7 @@ use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use bytes::Bytes;
 use russh::ChannelMsg;
+use serde::Deserialize;
 use ssh_client::{connect_ssh, open_exec_channel};
 use std::{
     net::Ipv4Addr,
@@ -229,19 +230,28 @@ pub async fn get_vm_settings_raw(
     .context("get_vm_settings_raw timed out")?
 }
 
-fn parse_vm_settings(stdout: &str) -> Result<VmSettings> {
-    let settings: serde_json::Value =
+#[derive(Deserialize, Default)]
+struct SettingsJson {
+    env: Option<SettingsEnv>,
+    model: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+struct SettingsEnv {
+    #[serde(rename = "ANTHROPIC_AUTH_TOKEN")]
+    auth_token: Option<String>,
+}
+
+pub fn parse_vm_settings(stdout: &str) -> Result<VmSettings> {
+    let settings: SettingsJson =
         serde_json::from_str(stdout).context("failed to parse settings JSON")?;
-    let env = settings.get("env");
     Ok(VmSettings {
-        has_api_key: env
-            .and_then(|v| v.get("ANTHROPIC_AUTH_TOKEN"))
-            .and_then(|v| v.as_str())
+        has_api_key: settings
+            .env
+            .as_ref()
+            .and_then(|e| e.auth_token.as_deref())
             .is_some_and(|s| !s.is_empty()),
-        model: settings
-            .get("model")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string()),
+        model: settings.model,
     })
 }
 
