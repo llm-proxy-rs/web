@@ -2,7 +2,7 @@
   "private": true,
   "scripts": {
     "copy-fonts": "mkdir -p dist/fonts && cp node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff2 node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-500-normal.woff2 node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-400-normal.woff2 node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-400-italic.woff2 node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-500-normal.woff2 node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-600-normal.woff2 dist/fonts/",
-    "build": "npm run copy-fonts && esbuild src/index.tsx --bundle --minify --outfile=dist/app.js --loader:.tsx=tsx --loader:.ts=ts && ./node_modules/.bin/tailwindcss -i src/index.css -o dist/styles.css --minify",
+    "build": "npm run copy-fonts && cp src/oauth-close.js dist/oauth-close.js && esbuild src/index.tsx --bundle --minify --outfile=dist/app.js --loader:.tsx=tsx --loader:.ts=ts && ./node_modules/.bin/tailwindcss -i src/index.css -o dist/styles.css --minify",
     "watch": "esbuild src/index.tsx --bundle --outfile=dist/app.js --loader:.tsx=tsx --loader:.ts=ts --watch & ./node_modules/.bin/tailwindcss -i src/index.css -o dist/styles.css --watch",
     "build:js": "esbuild src/index.tsx --bundle --minify --outfile=dist/app.js --loader:.tsx=tsx --loader:.ts=ts",
     "build:css": "./node_modules/.bin/tailwindcss -i src/index.css -o dist/styles.css --minify",
@@ -12,14 +12,14 @@
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\""
   },
   "devDependencies": {
-    "@playwright/test": "^1.58.2",
+    "@playwright/test": "^1.59.1",
     "@tailwindcss/cli": "^4.2.2",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@types/react-syntax-highlighter": "^15.5.13",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
-    "esbuild": "^0.27.4",
+    "esbuild": "^0.28.0",
     "prettier": "^3.8.1",
     "tailwindcss": "^4.2.2",
     "typescript": "^6.0.2"

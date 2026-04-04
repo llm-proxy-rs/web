@@ -3,6 +3,8 @@
  * VP-02  Polls /api/vm-status and transitions to ready
  * VP-03  IconRail is accessible during loading
  * VP-04  Terminal WS not opened until vmId is set
+ * VP-05  Reset button appears after provisioning with has_user_rootfs
+ * VP-06  Reset button reappears after re-provisioning
  */
 import { test, expect } from "@playwright/test";
 import { setupApp, VM_ID } from "./helpers/setup";
@@ -165,6 +167,47 @@ test.describe("vm provisioning", () => {
     await expect(page.getByTitle("Reset environment")).not.toBeVisible();
 
     // After polling returns ready with has_user_rootfs: true, button should appear
+    await expect(page.getByTitle("Reset environment")).toBeVisible({
+      timeout: 10000,
+    });
+  });
+
+  test("VP-06 reset button reappears after vm-status returns has_user_rootfs true", async ({
+    page,
+  }) => {
+    let pollCount = 0;
+
+    // First poll returns provisioning so we can assert the button is hidden;
+    // subsequent polls return ready with has_user_rootfs: true.
+    await page.route("**/api/vm-status", (route) => {
+      pollCount++;
+      if (pollCount >= 2) {
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            status: "ready",
+            vm_id: VM_ID,
+            has_user_rootfs: true,
+          }),
+        });
+      }
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ status: "provisioning" }),
+      });
+    });
+
+    await page.routeWebSocket(/\/ws\b/, () => {});
+
+    // Start with hasUserRootfs false and empty vmId (simulates post-reset state)
+    await setupApp(page, { vmId: "", hasUserRootfs: false });
+
+    // Initially no reset button (first poll returns provisioning)
+    await expect(page.getByTitle("Reset environment")).not.toBeVisible();
+
+    // After polling picks up has_user_rootfs: true, reset button should appear
     await expect(page.getByTitle("Reset environment")).toBeVisible({
       timeout: 10000,
     });

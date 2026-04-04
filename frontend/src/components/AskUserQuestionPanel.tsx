@@ -1,6 +1,100 @@
 import React, { useState, useCallback, useRef, useEffect } from "react";
 import type { PendingQuestion, Question } from "../types";
 
+type RiskLevel = "low" | "medium" | "high";
+
+function classifyRisk(questions: Question[]): RiskLevel {
+  const text = questions
+    .map((q) => `${q.question} ${q.header ?? ""}`)
+    .join(" ")
+    .toLowerCase();
+  if (
+    /\b(bash|shell|sudo|rm\s|rm\b|force|reset\s--hard|drop\s|delete|push\s--force|kill)\b/.test(
+      text,
+    )
+  )
+    return "high";
+  if (/\b(edit|write|create|modify|install|update|patch|commit)\b/.test(text))
+    return "medium";
+  return "low";
+}
+
+const RISK_STYLES: Record<
+  RiskLevel,
+  {
+    gradient: string;
+    badge: string;
+    badgeText: string;
+    label: string;
+    selected: string;
+    selectedDesc: string;
+    check: string;
+    accent: string;
+    kbd: string;
+    otherBorder: string;
+    stepDot: string;
+    headerBadge: string;
+    submitBtn: string;
+  }
+> = {
+  low: {
+    gradient: "from-emerald-500 via-teal-400 to-cyan-400",
+    badge:
+      "bg-emerald-500/10 text-emerald-500 border-emerald-200 dark:border-emerald-800/50",
+    badgeText: "Safe",
+    label: "text-emerald-600 dark:text-emerald-400",
+    selected:
+      "border-emerald-300 bg-emerald-50/80 ring-1 ring-emerald-200/50 dark:border-emerald-600 dark:bg-emerald-900/25",
+    selectedDesc: "text-emerald-600/70 dark:text-emerald-300/70",
+    check: "text-emerald-500",
+    accent: "from-emerald-500/10 to-teal-500/10",
+    kbd: "bg-emerald-500",
+    otherBorder:
+      "border-emerald-300 bg-emerald-50/80 ring-1 ring-emerald-200/50 dark:border-emerald-600 dark:bg-emerald-900/25",
+    stepDot: "bg-emerald-500",
+    headerBadge:
+      "border-emerald-100 bg-emerald-50 text-emerald-600 dark:border-emerald-800/50 dark:bg-emerald-900/30 dark:text-emerald-400",
+    submitBtn: "from-emerald-600 to-emerald-500",
+  },
+  medium: {
+    gradient: "from-amber-500 via-yellow-400 to-orange-400",
+    badge:
+      "bg-amber-500/10 text-amber-500 border-amber-200 dark:border-amber-800/50",
+    badgeText: "Review",
+    label: "text-amber-600 dark:text-amber-400",
+    selected:
+      "border-amber-300 bg-amber-50/80 ring-1 ring-amber-200/50 dark:border-amber-600 dark:bg-amber-900/25",
+    selectedDesc: "text-amber-600/70 dark:text-amber-300/70",
+    check: "text-amber-500",
+    accent: "from-amber-500/10 to-yellow-500/10",
+    kbd: "bg-amber-500",
+    otherBorder:
+      "border-amber-300 bg-amber-50/80 ring-1 ring-amber-200/50 dark:border-amber-600 dark:bg-amber-900/25",
+    stepDot: "bg-amber-500",
+    headerBadge:
+      "border-amber-100 bg-amber-50 text-amber-600 dark:border-amber-800/50 dark:bg-amber-900/30 dark:text-amber-400",
+    submitBtn: "from-amber-600 to-amber-500",
+  },
+  high: {
+    gradient: "from-red-500 via-rose-400 to-orange-400",
+    badge: "bg-red-500/10 text-red-500 border-red-200 dark:border-red-800/50",
+    badgeText: "Caution",
+    label: "text-red-600 dark:text-red-400",
+    selected:
+      "border-red-300 bg-red-50/80 ring-1 ring-red-200/50 dark:border-red-600 dark:bg-red-900/25",
+    selectedDesc: "text-red-600/70 dark:text-red-300/70",
+    check: "text-red-500",
+    accent: "from-red-500/10 to-rose-500/10",
+    kbd: "bg-red-500",
+    otherBorder:
+      "border-red-300 bg-red-50/80 ring-1 ring-red-200/50 dark:border-red-600 dark:bg-red-900/25",
+    stepDot: "bg-red-500",
+    headerBadge:
+      "border-red-100 bg-red-50 text-red-600 dark:border-red-800/50 dark:bg-red-900/30 dark:text-red-400",
+    submitBtn: "from-red-600 to-red-500",
+  },
+};
+
 interface AskUserQuestionPanelProps {
   pendingQuestion: PendingQuestion;
   onSubmit: (requestId: string, answers: Record<string, string>) => void;
@@ -163,6 +257,8 @@ export default function AskUserQuestionPanel({
   const isOtherOn = otherActive.get(currentStep) ?? false;
   const isLast = currentStep === total - 1;
   const isFirst = currentStep === 0;
+  const risk = classifyRisk(questions);
+  const rs = RISK_STYLES[risk];
 
   return (
     <div
@@ -174,14 +270,18 @@ export default function AskUserQuestionPanel({
       }`}
     >
       <div className="relative overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-lg dark:border-gray-700/50 dark:bg-gray-800/90">
-        <div className="absolute left-0 right-0 top-0 h-[2px] bg-gradient-to-r from-blue-500 via-cyan-400 to-teal-400" />
+        <div
+          className={`absolute left-0 right-0 top-0 h-[2px] bg-gradient-to-r ${rs.gradient}`}
+        />
 
         <div className="px-4 pb-2 pt-3.5">
           <div className="mb-1.5 flex items-center gap-2.5">
             <div className="relative flex-shrink-0">
-              <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500/10 to-cyan-500/10">
+              <div
+                className={`flex h-6 w-6 items-center justify-center rounded-lg bg-gradient-to-br ${rs.accent}`}
+              >
                 <svg
-                  className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400"
+                  className={`h-3.5 w-3.5 ${rs.label}`}
                   fill="none"
                   viewBox="0 0 24 24"
                   strokeWidth={1.75}
@@ -194,14 +294,23 @@ export default function AskUserQuestionPanel({
                   />
                 </svg>
               </div>
-              <div className="absolute -right-0.5 -top-0.5 h-2 w-2 animate-pulse rounded-full bg-cyan-400" />
+              <div
+                className={`absolute -right-0.5 -top-0.5 h-2 w-2 animate-pulse rounded-full ${risk === "high" ? "bg-red-400" : risk === "medium" ? "bg-amber-400" : "bg-cyan-400"}`}
+              />
             </div>
             <div className="flex min-w-0 flex-1 items-center gap-2">
               <span className="text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
                 Claude needs your input
               </span>
+              <span
+                className={`inline-flex items-center rounded border px-1.5 py-px text-xs font-semibold uppercase tracking-wider ${rs.badge}`}
+              >
+                {rs.badgeText}
+              </span>
               {q.header && (
-                <span className="inline-flex items-center rounded border border-blue-100 bg-blue-50 px-1.5 py-px text-xs font-semibold uppercase tracking-wider text-blue-600 dark:border-blue-800/50 dark:bg-blue-900/30 dark:text-blue-400">
+                <span
+                  className={`inline-flex items-center rounded border px-1.5 py-px text-xs font-semibold uppercase tracking-wider ${rs.headerBadge}`}
+                >
                   {q.header}
                 </span>
               )}
@@ -222,9 +331,9 @@ export default function AskUserQuestionPanel({
                   onClick={() => setCurrentStep(i)}
                   className={`h-[3px] rounded-full transition-all duration-300 ${
                     i === currentStep
-                      ? "w-5 bg-blue-500"
+                      ? `w-5 ${rs.stepDot}`
                       : i < currentStep
-                        ? "w-2.5 bg-blue-300"
+                        ? `w-2.5 ${rs.stepDot} opacity-50`
                         : "w-2.5 bg-gray-200 dark:bg-gray-700"
                   }`}
                 />
@@ -253,14 +362,14 @@ export default function AskUserQuestionPanel({
                   onClick={() => toggleOption(currentStep, opt.label, multi)}
                   className={`group flex w-full items-center gap-2.5 rounded-lg border px-3 py-2 text-left transition-all duration-150 ${
                     isSelected
-                      ? "border-blue-300 bg-blue-50/80 ring-1 ring-blue-200/50 dark:border-blue-600 dark:bg-blue-900/25"
+                      ? rs.selected
                       : "border-gray-200 hover:border-gray-300 hover:bg-gray-50/60 dark:border-gray-700/60"
                   }`}
                 >
                   <kbd
                     className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded font-mono text-xs transition-all duration-150 ${
                       isSelected
-                        ? "bg-blue-500 font-semibold text-white"
+                        ? `${rs.kbd} font-semibold text-white`
                         : "border border-gray-200 bg-gray-100 text-gray-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-500"
                     }`}
                   >
@@ -274,7 +383,7 @@ export default function AskUserQuestionPanel({
                     </div>
                     {opt.description && (
                       <div
-                        className={`text-xs leading-snug ${isSelected ? "text-blue-600/70 dark:text-blue-300/70" : "text-gray-400 dark:text-gray-500"}`}
+                        className={`text-xs leading-snug ${isSelected ? rs.selectedDesc : "text-gray-400 dark:text-gray-500"}`}
                       >
                         {opt.description}
                       </div>
@@ -282,7 +391,7 @@ export default function AskUserQuestionPanel({
                   </div>
                   {isSelected && (
                     <svg
-                      className="h-4 w-4 flex-shrink-0 text-blue-500"
+                      className={`h-4 w-4 flex-shrink-0 ${rs.check}`}
                       fill="none"
                       stroke="currentColor"
                       viewBox="0 0 24 24"
@@ -304,14 +413,14 @@ export default function AskUserQuestionPanel({
               onClick={() => toggleOther(currentStep, multi)}
               className={`group flex w-full items-center gap-2.5 rounded-lg border px-3 py-2 text-left transition-all duration-150 ${
                 isOtherOn
-                  ? "border-blue-300 bg-blue-50/80 ring-1 ring-blue-200/50 dark:border-blue-600 dark:bg-blue-900/25"
+                  ? rs.otherBorder
                   : "border-dashed border-gray-200 hover:border-gray-300 hover:bg-gray-50/60 dark:border-gray-700/60"
               }`}
             >
               <kbd
                 className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded font-mono text-xs transition-all duration-150 ${
                   isOtherOn
-                    ? "bg-blue-500 font-semibold text-white"
+                    ? `${rs.kbd} font-semibold text-white`
                     : "border border-gray-200 bg-gray-100 text-gray-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-500"
                 }`}
               >
@@ -340,7 +449,7 @@ export default function AskUserQuestionPanel({
                     e.stopPropagation();
                   }}
                   placeholder="Type your answer..."
-                  className="w-full rounded-lg border-0 bg-gray-50 px-3 py-1.5 text-sm text-gray-900 outline-none ring-1 ring-gray-200 placeholder:text-gray-400 focus:ring-2 focus:ring-blue-400 dark:bg-gray-900/60 dark:text-gray-100 dark:ring-gray-700"
+                  className="w-full rounded-lg border-0 bg-gray-50 px-3 py-1.5 text-sm text-gray-900 outline-none ring-1 ring-gray-200 placeholder:text-gray-400 focus:ring-2 focus:ring-current dark:bg-gray-900/60 dark:text-gray-100 dark:ring-gray-700"
                 />
               </div>
             )}
@@ -373,7 +482,7 @@ export default function AskUserQuestionPanel({
               <button
                 type="button"
                 onClick={handleSubmit}
-                className="inline-flex items-center gap-1 rounded-lg bg-gradient-to-r from-blue-600 to-blue-500 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm transition-all hover:shadow-md"
+                className={`inline-flex items-center gap-1 rounded-lg bg-gradient-to-r ${rs.submitBtn} px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm transition-all hover:shadow-md`}
               >
                 Submit
                 <span className="ml-0.5 font-mono text-xs opacity-70">
@@ -384,7 +493,7 @@ export default function AskUserQuestionPanel({
               <button
                 type="button"
                 onClick={() => setCurrentStep((s) => s + 1)}
-                className="inline-flex items-center gap-1 rounded-lg bg-gradient-to-r from-blue-600 to-blue-500 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm transition-all hover:shadow-md"
+                className={`inline-flex items-center gap-1 rounded-lg bg-gradient-to-r ${rs.submitBtn} px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm transition-all hover:shadow-md`}
               >
                 Next
                 <span className="ml-0.5 font-mono text-xs opacity-70">

@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 use tokio::{
-    fs::{copy, create_dir_all, hard_link},
+    fs::{copy, create_dir_all},
     process::{Child, Command},
     time::{sleep, timeout},
 };
@@ -14,7 +14,7 @@ use tokio::{
 use crate::vm::JailerConfig;
 
 pub(crate) fn spawn_firecracker_jailed(vm_id: &str, jailer: &JailerConfig) -> Result<Child> {
-    Ok(Command::new("sudo")
+    Ok(Command::new("/usr/bin/sudo")
         .args([
             jailer.jailer_path.to_string_lossy().as_ref(),
             "--id",
@@ -94,6 +94,62 @@ mod tests {
         let dir = build_chroot_dir(Path::new("/tmp"), "test-vm");
         assert_eq!(dir, PathBuf::from("/tmp/firecracker/test-vm/root"));
     }
+
+    #[tokio::test]
+    async fn prepare_jail_resources_copies_kernel() {
+        let tmp = std::env::temp_dir().join("test_prepare_copies");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let chroot = tmp.join("chroot");
+        let kernel_src = tmp.join("vmlinux-src");
+        std::fs::create_dir_all(&tmp).unwrap();
+        std::fs::write(&kernel_src, b"ELF_KERNEL_DATA").unwrap();
+
+        prepare_jail_resources(&chroot, &kernel_src).await.unwrap();
+
+        assert!(chroot.join("run").is_dir());
+        assert_eq!(
+            std::fs::read(chroot.join("vmlinux")).unwrap(),
+            b"ELF_KERNEL_DATA"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[tokio::test]
+    async fn prepare_jail_resources_skips_copy_when_kernel_exists() {
+        let tmp = std::env::temp_dir().join("test_prepare_skip");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let chroot = tmp.join("chroot");
+        let kernel_src = tmp.join("vmlinux-src");
+        std::fs::create_dir_all(&chroot).unwrap();
+        std::fs::write(&kernel_src, b"NEW_KERNEL").unwrap();
+        std::fs::write(chroot.join("vmlinux"), b"EXISTING_KERNEL").unwrap();
+
+        prepare_jail_resources(&chroot, &kernel_src).await.unwrap();
+
+        assert_eq!(
+            std::fs::read(chroot.join("vmlinux")).unwrap(),
+            b"EXISTING_KERNEL"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[tokio::test]
+    async fn prepare_jail_resources_creates_run_dir() {
+        let tmp = std::env::temp_dir().join("test_prepare_run");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let chroot = tmp.join("chroot");
+        let kernel_src = tmp.join("vmlinux-src");
+        std::fs::create_dir_all(&tmp).unwrap();
+        std::fs::write(&kernel_src, b"K").unwrap();
+
+        prepare_jail_resources(&chroot, &kernel_src).await.unwrap();
+
+        assert!(chroot.join("run").is_dir());
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 }
 
 // Prepares the jail directory. Layout on disk (chroot_dir = <chroot_base>/firecracker/<vm_id>/root/):
@@ -103,9 +159,13 @@ mod tests {
 //   vmlinux                  <- kernel (hard-linked from host, or copied)
 //   rootfs.ext4              <- rootfs copy (written separately by copy_rootfs)
 pub(crate) async fn prepare_jail_resources(chroot_dir: &Path, kernel_src: &Path) -> Result<()> {
-    create_dir_all(chroot_dir.join("run")).await?;
+    create_dir_all(chroot_dir.join("run"))
+        .await
+        .context("failed to create jail run directory")?;
+    // Safety: this check-then-copy is not atomic, but concurrent VM creation
+    // for the same user is prevented by acquire_provisioning_slot.
     let kernel_dst = chroot_dir.join("vmlinux");
-    if hard_link(kernel_src, &kernel_dst).await.is_err() {
+    if !kernel_dst.exists() {
         copy(kernel_src, &kernel_dst).await.with_context(|| {
             format!(
                 "failed to copy kernel from {} to {}",

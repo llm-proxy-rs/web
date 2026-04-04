@@ -136,7 +136,7 @@ function ResetButton({
           k.startsWith("chat_running_task_"),
       );
       keysToRemove.forEach((k) => localStorage.removeItem(k));
-      window.location.href = "/";
+      window.location.reload();
     }
   }, [csrfFetch]);
 

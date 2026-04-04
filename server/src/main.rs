@@ -6,12 +6,19 @@ mod files;
 mod gateway_auth;
 mod gateway_callback;
 mod handlers;
+mod http_client;
+mod mcp;
+mod mcp_oauth;
 mod settings;
+mod skills;
 mod state;
 mod static_files;
 mod templates;
 mod terminal;
 mod upload;
+
+#[cfg(test)]
+mod test_helpers;
 
 use anyhow::{Context, Result};
 use axum::{
@@ -20,10 +27,11 @@ use axum::{
     http::HeaderValue,
     middleware::{self, Next},
     response::Response,
-    routing::{get, post},
+    routing::{delete, get, post},
 };
-use firecracker_manager::{cleanup_stale_vms, setup_host_networking};
+use firecracker_manager::{clean_stale_vms, setup_host_networking};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::Arc;
 use time::Duration;
 use tokio::{net::TcpListener, signal, sync::oneshot, task::AbortHandle};
 use tower_sessions::{ExpiredDeletion, Expiry, SessionManagerLayer, cookie::SameSite};
@@ -48,9 +56,24 @@ use crate::{
         get_csrf_token_handler, get_or_create_terminal, get_terminal_page, handle_chat_upload,
         list_chat_sessions_handler, vm_status_handler,
     },
+    mcp::{
+        add_handler as mcp_add_handler, delete_handler as mcp_delete_handler,
+        list_handler as mcp_list_handler,
+    },
+    mcp_oauth::{
+        callback_handler as mcp_oauth_callback_handler,
+        discover_handler as mcp_oauth_discover_handler,
+        register_handler as mcp_oauth_register_handler, start_handler as mcp_oauth_start_handler,
+    },
     settings::{get_settings_handler, put_settings_handler},
+    skills::{
+        create_handler as skills_create_handler, delete_handler as skills_delete_handler,
+        list_handler as skills_list_handler,
+    },
     state::{AppState, load_config},
-    static_files::{load_static_assets, serve_app_js, serve_font, serve_styles_css},
+    static_files::{
+        render_oauth_close_page, serve_app_js, serve_font, serve_oauth_close, serve_styles_css,
+    },
     terminal::handle_ws_upgrade,
     upload::upload_file_handler,
 };
@@ -64,57 +87,79 @@ async fn main() -> Result<()> {
         )
         .init();
     let app_config = load_config()?;
-    let static_assets = load_static_assets(&app_config.static_dir)?;
     let pg_pool = store::connect_db(&app_config.database_url).await?;
     store::run_migrations(&pg_pool).await?;
-    let (session_store, deletion_task) = create_session_store(pg_pool.clone()).await?;
-    let app_state = AppState::new(app_config, pg_pool, static_assets);
+    let session_store_handle = create_session_store(pg_pool.clone()).await?;
+    let vm_config_ops: Arc<dyn chat_settings::VmConfigOps> =
+        Arc::new(chat_settings::SshVmConfigOps {
+            ssh_key_path: app_config.ssh_key_path.clone(),
+            ssh_user: app_config.ssh_user.clone(),
+            vm_host_key_path: app_config.vm_host_key_path.clone(),
+        });
+    let http_client: Arc<dyn http_client::HttpClient> = Arc::new(
+        http_client::ReqwestHttpClient::new(std::time::Duration::from_secs(15))
+            .expect("failed to build HTTP client"),
+    );
+    let app_state = AppState::new(app_config, pg_pool, vm_config_ops, http_client);
     let port = app_state.config.port;
-    cleanup_stale_vms(
+    clean_stale_vms(
         &app_state.config.net_helper_path,
         &app_state.config.jailer_chroot_base,
     )
     .await;
     setup_host_networking(&app_state.config.net_helper_path).await?;
-    let (mmds_refresh_abort_handle, idle_vm_sweep_abort_handle) =
-        spawn_background_tasks(&app_state);
-    let router = build_router(app_state.clone(), session_store);
+    let background_task_handles = spawn_background_tasks(&app_state);
+    let router = build_router(app_state.clone(), session_store_handle.store);
     serve_router(
         router,
         port,
         app_state,
-        deletion_task.abort_handle(),
-        mmds_refresh_abort_handle,
-        idle_vm_sweep_abort_handle,
+        session_store_handle.deletion_task.abort_handle(),
+        background_task_handles.mmds_refresh,
+        background_task_handles.idle_vm_sweep,
     )
     .await?;
     Ok(())
 }
 
-async fn create_session_store(
-    pg_pool: store::PgPool,
-) -> Result<(
-    PostgresStore,
-    tokio::task::JoinHandle<Result<(), tower_sessions::session_store::Error>>,
-)> {
+struct SessionStoreHandle {
+    store: PostgresStore,
+    deletion_task: tokio::task::JoinHandle<Result<(), tower_sessions::session_store::Error>>,
+}
+
+async fn create_session_store(pg_pool: store::PgPool) -> Result<SessionStoreHandle> {
     let session_store = PostgresStore::new(pg_pool);
-    session_store.migrate().await?;
+    session_store
+        .migrate()
+        .await
+        .context("failed to migrate session store")?;
     let deletion_task = tokio::task::spawn(
         session_store
             .clone()
             .continuously_delete_expired(tokio::time::Duration::from_secs(3600)),
     );
-    Ok((session_store, deletion_task))
+    Ok(SessionStoreHandle {
+        store: session_store,
+        deletion_task,
+    })
 }
 
-fn spawn_background_tasks(app_state: &AppState) -> (Option<AbortHandle>, AbortHandle) {
-    let mmds_refresh_abort_handle = if app_state.config.use_iam_creds {
+struct BackgroundTaskHandles {
+    mmds_refresh: Option<AbortHandle>,
+    idle_vm_sweep: AbortHandle,
+}
+
+fn spawn_background_tasks(app_state: &AppState) -> BackgroundTaskHandles {
+    let mmds_refresh = if app_state.config.use_iam_creds {
         Some(spawn_mmds_refresh_task(app_state.clone()).abort_handle())
     } else {
         None
     };
-    let idle_vm_sweep_abort_handle = spawn_idle_vm_sweep_task(app_state.clone()).abort_handle();
-    (mmds_refresh_abort_handle, idle_vm_sweep_abort_handle)
+    let idle_vm_sweep = spawn_idle_vm_sweep_task(app_state.clone()).abort_handle();
+    BackgroundTaskHandles {
+        mmds_refresh,
+        idle_vm_sweep,
+    }
 }
 
 fn build_router(app_state: AppState, session_store: PostgresStore) -> Router {
@@ -145,19 +190,47 @@ fn build_router(app_state: AppState, session_store: PostgresStore) -> Router {
             "/api/settings",
             get(get_settings_handler).put(put_settings_handler),
         )
+        .route(
+            "/api/mcp-servers",
+            get(mcp_list_handler).post(mcp_add_handler),
+        )
+        .route("/api/mcp-servers/{name}", delete(mcp_delete_handler))
+        .route(
+            "/api/mcp-servers/oauth-discover",
+            get(mcp_oauth_discover_handler),
+        )
+        .route(
+            "/api/mcp-servers/oauth-register",
+            post(mcp_oauth_register_handler),
+        )
+        .route(
+            "/api/mcp-servers/oauth-start",
+            post(mcp_oauth_start_handler),
+        )
         .route("/api/vm-status", get(vm_status_handler))
         .route("/api/csrf-token", get(get_csrf_token_handler))
+        .route(
+            "/api/skills",
+            get(skills_list_handler).post(skills_create_handler),
+        )
+        .route("/api/skills/{name}", delete(skills_delete_handler))
         .route("/rootfs/delete", post(delete_user_rootfs_handler))
         .route("/terminal/{id}", get(get_terminal_page))
         .route("/ws", get(handle_ws_upgrade))
         .route("/login", get(get_login_handler))
         .route("/login/cognito", get(get_cognito_login_handler))
+        .route(
+            "/oauth-close",
+            get(|| async { axum::response::Html(render_oauth_close_page()) }),
+        )
         .route("/logout", post(get_logout_handler))
         .route("/callback", get(get_callback_handler))
         .route("/callback/gateway", get(gateway_callback_handler))
+        .route("/callback/mcp-oauth", get(mcp_oauth_callback_handler))
         .route("/api/renew-gateway-key", post(renew_gateway_key_handler))
         .route("/static/app.js", get(serve_app_js))
         .route("/static/styles.css", get(serve_styles_css))
+        .route("/static/oauth-close.js", get(serve_oauth_close))
         .route("/static/fonts/{filename}", get(serve_font))
         .with_state(app_state)
         .layer(middleware::from_fn(csrf_middleware))
@@ -232,12 +305,7 @@ async fn serve_router(
     .await;
     let _ = shutdown_tx.send(());
     let _ = tokio::time::timeout(tokio::time::Duration::from_secs(5), serve_task).await;
-    save_all_vm_rootfs(
-        &app_state.vms,
-        &app_state.config.user_rootfs_dir,
-        &app_state.rootfs_lock,
-    )
-    .await?;
+    save_all_vm_rootfs(&app_state.vms).await?;
     Ok(())
 }
 
@@ -247,12 +315,7 @@ fn spawn_idle_vm_sweep_task(app_state: AppState) -> tokio::task::JoinHandle<()> 
         interval.tick().await;
         loop {
             interval.tick().await;
-            sweep_idle_vms(
-                &app_state.vms,
-                &app_state.config.user_rootfs_dir,
-                &app_state.rootfs_lock,
-            )
-            .await;
+            sweep_idle_vms(&app_state.vms).await;
         }
     })
 }

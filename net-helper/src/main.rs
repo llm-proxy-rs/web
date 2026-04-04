@@ -93,7 +93,8 @@ fn run_cmd(prog: &str, args: &[&str]) -> Result<()> {
 }
 
 fn cmd_tap_create(tap_name: &str, cidr: &Ipv4Net) -> Result<()> {
-    let _ = Command::new("ip").args(["link", "del", tap_name]).status();
+    // Pre-delete is best-effort; tap may not exist yet
+    let _best_effort = Command::new("ip").args(["link", "del", tap_name]).status();
     run_cmd("ip", &["tuntap", "add", "dev", tap_name, "mode", "tap"])?;
     run_cmd("ip", &["addr", "add", &cidr.to_string(), "dev", tap_name])?;
     run_cmd("ip", &["link", "set", "dev", tap_name, "up"])

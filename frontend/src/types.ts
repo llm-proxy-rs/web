@@ -6,6 +6,12 @@ export interface Conversation {
   createdAt: number;
 }
 
+export interface McpServer {
+  name: string;
+  url: string;
+  headers?: Record<string, string>;
+}
+
 export interface ChatSession {
   session_id: string;
   created_at: string;
@@ -76,6 +82,7 @@ export interface AssistantMessage extends BaseMessage {
   type: "assistant";
   content: string;
   isThinking?: boolean;
+  elapsedMs?: number;
 }
 
 export interface ToolMessage extends BaseMessage {
@@ -191,3 +198,19 @@ export interface StreamPhaseInfo {
 }
 
 export type ViewTab = "chat" | "terminal";
+
+// Agent task tracking (intercepted from TaskCreate/TaskUpdate tool events)
+export interface AgentTask {
+  id: string;
+  subject: string;
+  description?: string;
+  status: "pending" | "in_progress" | "completed";
+  activeForm?: string;
+  blockedBy?: string[];
+}
+
+// Token usage estimation
+export interface TokenUsage {
+  estimatedTokens: number;
+  contextWindow: number;
+}

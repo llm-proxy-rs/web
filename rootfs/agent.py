@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.14"
-# dependencies = ["claude-agent-sdk>=0.1.50"]
+# dependencies = ["claude-agent-sdk>=0.1.52"]
 # ///
 import asyncio
 import contextvars
@@ -17,6 +17,19 @@ QUESTION_TIMEOUT_SECS = 3600
 MCP_PROXY_PORT = 8443
 # Replaced by build_rootfs.py when --mcp-base-url is provided.
 MCP_SERVERS: dict = {}
+
+
+def load_mcp_servers() -> dict:
+    """Merge build-time MCP_SERVERS with runtime servers from ~/.claude.json."""
+    servers = dict(MCP_SERVERS)
+    try:
+        with open(os.path.expanduser("~/.claude.json")) as f:
+            data = json.load(f)
+        servers.update(data.get("mcpServers", {}))
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+    return servers
+
 
 # Allowed root directories for work_dir. Populated at startup via _init_allowed_roots().
 _ALLOWED_WORK_DIR_ROOTS: list[str] = []
@@ -376,7 +389,7 @@ async def _run_query_inner(
         cwd=work_dir,
         setting_sources=["user"],
         can_use_tool=handle_tool_permission,
-        mcp_servers=MCP_SERVERS,
+        mcp_servers=load_mcp_servers(),
         hooks={
             "PreToolUse": [
                 HookMatcher(

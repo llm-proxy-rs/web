@@ -136,17 +136,17 @@ test.describe("message queue", () => {
     // Start streaming
     await sendMessage(page, "Hello");
 
-    // During streaming with no queue — basic queue placeholder
+    // During streaming — placeholder stays consistent
     await expect(page.locator("textarea")).toHaveAttribute(
       "placeholder",
-      "Type to queue a message…",
+      "Message Claude…",
     );
 
-    // Queue a message — placeholder shows count
+    // Queue a message — placeholder still consistent
     await sendMessage(page, "Queued");
     await expect(page.locator("textarea")).toHaveAttribute(
       "placeholder",
-      "Type to queue a message (1 pending)…",
+      "Message Claude…",
     );
   });
 

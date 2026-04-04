@@ -8,6 +8,8 @@ import type {
   StoredQuestion,
   ToolMessage,
   TranscriptMessage,
+  AgentTask,
+  TokenUsage,
 } from "../types";
 import type { ChatStateResult } from "./useChatState";
 import { buildMessagesFromTranscript } from "../utils/transcript";
@@ -127,8 +129,11 @@ function createPersistScheduler(): PersistScheduler {
 interface StreamState {
   taskId: string | null;
   thinkingMsgId: string | null;
+  thinkingStartedAt: number | null;
   assistantMsgId: string | null;
   toolIdToMsgId: Map<string, string>;
+  toolIdToName: Map<string, string>;
+  estimatedTokens: number;
 }
 
 function getOrCreateStreamState(
@@ -140,8 +145,11 @@ function getOrCreateStreamState(
     state = {
       taskId: null,
       thinkingMsgId: null,
+      thinkingStartedAt: null,
       assistantMsgId: null,
       toolIdToMsgId: new Map(),
+      toolIdToName: new Map(),
+      estimatedTokens: 0,
     };
     map.set(conversationId, state);
   }
@@ -235,11 +243,18 @@ export function useSseHandlers(
       const sealThinking = () => {
         if (!ss || !ss.thinkingMsgId) return;
         const msgId = ss.thinkingMsgId;
+        const startedAt = ss.thinkingStartedAt;
         ss.thinkingMsgId = null;
+        ss.thinkingStartedAt = null;
         const msgs = getMessages(session);
         const thinkMsg = msgs.find((m) => m.id === msgId);
         if (thinkMsg && !thinkMsg.content) {
           removeMessage(session, msgId);
+        } else if (thinkMsg && startedAt) {
+          updateMessageById(session, msgId, (m) => ({
+            ...m,
+            elapsedMs: Date.now() - startedAt,
+          }));
         }
       };
 
@@ -272,8 +287,10 @@ export function useSseHandlers(
           if (!session || !ss) break;
           const id = generateId();
           ss.thinkingMsgId = id;
+          ss.thinkingStartedAt = Date.now();
           ss.assistantMsgId = null;
           setStreamPhase(session, { phase: "processing" });
+          chatState.setStreamStartTime?.(session, Date.now());
           addMessage(session, {
             id,
             type: "assistant",
@@ -318,6 +335,12 @@ export function useSseHandlers(
           const { text } = event.payload;
           sealThinking();
           setStreamPhase(session, { phase: "responding" });
+          // Track token estimate
+          ss.estimatedTokens += Math.ceil(text.length / 4);
+          chatState.setTokenUsage?.(session, {
+            estimatedTokens: ss.estimatedTokens,
+            contextWindow: 200_000,
+          });
           if (!ss.assistantMsgId) {
             const id = generateId();
             ss.assistantMsgId = id;
@@ -349,8 +372,48 @@ export function useSseHandlers(
           const { id: toolId, name, input } = event.payload;
           sealThinking();
           ss.assistantMsgId = null;
+          ss.toolIdToName.set(toolId, name);
           setStreamPhase(session, { phase: "tool_use", toolName: name });
+
+          // Intercept plan mode tools
+          if (name === "EnterPlanMode") {
+            chatState.setPlanActive?.(session, true);
+          }
+          if (name === "ExitPlanMode") {
+            chatState.setPlanActive?.(session, false);
+          }
+
+          // Intercept worktree tools
+          if (name === "EnterWorktree") {
+            chatState.setWorktreeActive?.(
+              session,
+              true,
+              String(input?.name ?? ""),
+            );
+          }
+
+          // Intercept TodoWrite — replaces entire task list from input
+          if (name === "TodoWrite" && Array.isArray(input?.todos)) {
+            const todos = input.todos as {
+              content?: string;
+              status?: string;
+              activeForm?: string;
+            }[];
+            chatState.replaceTasks?.(
+              session,
+              todos.map((t, i) => ({
+                id: String(i + 1),
+                subject: String(t.content ?? ""),
+                status:
+                  (t.status as "pending" | "in_progress" | "completed") ??
+                  "pending",
+                activeForm: t.activeForm ? String(t.activeForm) : undefined,
+              })),
+            );
+          }
+
           if (name === "AskUserQuestion") break;
+          if (name === "TodoWrite") break;
           const msgId = generateId();
           ss.toolIdToMsgId.set(toolId, msgId);
           addMessage(session, {
@@ -378,6 +441,94 @@ export function useSseHandlers(
           if (!session || !ss) break;
           const { tool_use_id, content, is_error } = event.payload;
           setStreamPhase(session, { phase: "thinking" });
+
+          // Track tokens from tool results
+          ss.estimatedTokens += Math.ceil(content.length / 4);
+          chatState.setTokenUsage?.(session, {
+            estimatedTokens: ss.estimatedTokens,
+            contextWindow: 200_000,
+          });
+
+          // Intercept task tool results (TaskCreate/TaskUpdate/TaskList/TaskGet
+          // are client-side tools from Claude Code CLI; they won't appear in our
+          // web app but we keep basic handling in case the tool set is extended.)
+          const toolName = ss.toolIdToName.get(tool_use_id);
+          if (
+            toolName === "TaskCreate" ||
+            toolName === "TaskUpdate" ||
+            toolName === "TaskList" ||
+            toolName === "TaskGet"
+          ) {
+            try {
+              const parsed = JSON.parse(content);
+              if (toolName === "TaskCreate" && parsed.task) {
+                chatState.upsertTask?.(session, {
+                  id: parsed.task.id,
+                  subject: parsed.task.subject,
+                  description: "",
+                  status: "pending",
+                });
+              } else if (toolName === "TaskUpdate" && parsed.taskId) {
+                chatState.upsertTask?.(session, {
+                  id: parsed.taskId,
+                  subject: "",
+                  status: parsed.statusChange?.to ?? "pending",
+                });
+              } else if (
+                (toolName === "TaskList" || toolName === "TaskGet") &&
+                parsed.tasks
+              ) {
+                for (const t of parsed.tasks) {
+                  chatState.upsertTask?.(session, {
+                    id: t.id,
+                    subject: t.subject,
+                    status: t.status,
+                    blockedBy: t.blockedBy,
+                  });
+                }
+              }
+            } catch {
+              /* ignore parse errors */
+            }
+          }
+
+          // Intercept worktree exit
+          if (toolName === "ExitWorktree") {
+            chatState.setWorktreeActive?.(session, false, "");
+          }
+
+          // Intercept TodoWrite at tool_result time — re-read todos from the
+          // stored ToolMessage input (tool_result itself is just a text string).
+          if (toolName === "TodoWrite") {
+            const msgId = ss.toolIdToMsgId.get(tool_use_id);
+            if (msgId) {
+              const msgs = getMessages(session);
+              const toolMsg = msgs.find((m) => m.id === msgId);
+              if (
+                toolMsg &&
+                toolMsg.type === "tool" &&
+                Array.isArray(toolMsg.toolInput?.todos)
+              ) {
+                const todos = toolMsg.toolInput.todos as {
+                  content?: string;
+                  status?: string;
+                  activeForm?: string;
+                }[];
+                chatState.replaceTasks?.(
+                  session,
+                  todos.map((t, i) => ({
+                    id: String(i + 1),
+                    subject: String(t.content ?? ""),
+                    status:
+                      (t.status as "pending" | "in_progress" | "completed") ??
+                      "pending",
+                    activeForm: t.activeForm ? String(t.activeForm) : undefined,
+                  })),
+                );
+              }
+            }
+          }
+
           const msgId = ss.toolIdToMsgId.get(tool_use_id);
           if (msgId) {
             updateMessageById(session, msgId, (m) => {
@@ -414,6 +565,8 @@ export function useSseHandlers(
             }
           }
           aqState.assistantMsgId = null;
+          // Stop the loading indicator — Claude is waiting for user input
+          setStreamPhase(conversation_id, { phase: "idle" });
           setSessionPendingQuestion(conversation_id, {
             requestId: request_id,
             taskId: task_id,
@@ -469,6 +622,7 @@ export function useSseHandlers(
           }
           doneState.assistantMsgId = null;
           doneState.toolIdToMsgId.clear();
+          doneState.toolIdToName.clear();
           streamStateRef.current.delete(conversation_id);
 
           const storedQuestion = getQuestionsForConversation(conversation_id);

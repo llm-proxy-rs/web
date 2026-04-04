@@ -4,6 +4,7 @@ use axum::{
     response::{IntoResponse, Redirect, Response},
 };
 use serde::Deserialize;
+use subtle::ConstantTimeEq;
 use tower_sessions::Session;
 use tracing::{error, info};
 
@@ -37,10 +38,18 @@ pub(crate) async fn gateway_callback_handler(
         .await
         .context("failed to retrieve oauth state from session")?;
 
-    if stored_state.as_deref() != Some(&query.state) {
+    let state_matches = stored_state.as_deref().is_some_and(|s| {
+        s.len() == query.state.len() && s.as_bytes().ct_eq(query.state.as_bytes()).unwrap_u8() == 1
+    });
+    if !state_matches {
         error!("gateway oauth state mismatch");
         return Ok(Redirect::to("/").into_response());
     }
+
+    session
+        .cycle_id()
+        .await
+        .context("failed to cycle session id")?;
 
     // Retrieve PKCE verifier
     let pkce_verifier = session

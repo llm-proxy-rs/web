@@ -2,8 +2,7 @@ use anyhow::{Context, Result};
 use bytes::Bytes;
 use russh::{Channel, client};
 use ssh_client::{SshClient, connect_ssh};
-use std::net::Ipv4Addr;
-use std::path::Path;
+use std::{net::Ipv4Addr, path::Path};
 use tokio::time::{Duration, sleep, timeout};
 use tracing::info;
 

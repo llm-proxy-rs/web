@@ -12,8 +12,9 @@ pub fn build_vm_config(
     vm_build_config: &VmBuildConfig,
     iam_creds: &HostIamCredential,
     user_rootfs: &Path,
+    user_id: Uuid,
 ) -> Result<VmConfig> {
-    let vm_id = Uuid::new_v4().to_string();
+    let vm_id = user_id.to_string();
     let mmds_metadata = build_mmds_with_iam(&vm_id, &iam_creds.role_name, &iam_creds.credential)?;
     info!("configured mmds");
     Ok(VmConfig {
@@ -39,8 +40,9 @@ pub fn build_vm_config(
 pub fn build_vm_config_without_iam(
     vm_build_config: &VmBuildConfig,
     user_rootfs: &Path,
+    user_id: Uuid,
 ) -> VmConfig {
-    let vm_id = Uuid::new_v4().to_string();
+    let vm_id = user_id.to_string();
     VmConfig {
         id: vm_id,
         kernel_path: vm_build_config.kernel_path.clone(),

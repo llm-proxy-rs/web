@@ -11,8 +11,8 @@ bytes = "1.11.1"
 common = { path = "../common" }
 futures = "0.3.32"
 futures-lite = "2.6.1"
-russh = "0.58.0"
+russh = "0.59.0"
 russh-sftp = "2.1.1"
-tokio = { version = "1.50.0", features = ["full"] }
+tokio = { version = "1.51.0", features = ["full"] }
 tokio-util = { version = "0.7.18", features = ["io"] }
 tracing = "0.1.44"

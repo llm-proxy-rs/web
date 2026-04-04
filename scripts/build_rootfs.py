@@ -35,6 +35,8 @@ INSTALL_DIR = Path("/var/lib/fc")
 ROOTFS_DIR = Path(__file__).parent.parent / "rootfs"
 AGENT_PY = ROOTFS_DIR / "agent.py"
 AGENT_SERVICE = ROOTFS_DIR / "agent.service"
+CLAUDE_UPDATE_SERVICE = ROOTFS_DIR / "claude-update.service"
+SKILLS_DIR = ROOTFS_DIR / "skills"
 
 # Runs as root inside the chroot.
 CHROOT_ROOT_SCRIPT = """\
@@ -175,20 +177,36 @@ def unpack_squashfs(workdir: Path, squashfs: Path) -> Path:
     return rootfs
 
 
-def setup_client_ssh_key(workdir: Path, rootfs: Path) -> Path:
+def setup_client_ssh_key(workdir: Path, rootfs: Path, ubuntu_name: str) -> Path:
     """Generate the keypair the server uses to SSH into the VM.
 
     Private key → returned (installed to /var/lib/fc/ later).
     Public key  → baked into the rootfs as ubuntu's authorized_keys.
+
+    Reuses the existing key from INSTALL_DIR if present, so that
+    previously built rootfs images remain accessible.
     """
+    existing_key = INSTALL_DIR / f"{ubuntu_name}.id_ed25519"
     private_key = workdir / "id_ed25519"
     public_key = workdir / "id_ed25519.pub"
     authorized_keys = rootfs / "home/ubuntu/.ssh/authorized_keys"
     ssh_dir = rootfs / "home/ubuntu/.ssh"
 
-    private_key.unlink(missing_ok=True)
-    public_key.unlink(missing_ok=True)
-    run(["ssh-keygen", "-t", "ed25519", "-f", str(private_key), "-N", ""])
+    if existing_key.exists():
+        print(f"  reusing existing client SSH key: {existing_key}")
+        shutil.copy(existing_key, private_key)
+        # Derive public key from existing private key
+        result = subprocess.run(
+            ["ssh-keygen", "-y", "-f", str(private_key)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        public_key.write_text(result.stdout)
+    else:
+        private_key.unlink(missing_ok=True)
+        public_key.unlink(missing_ok=True)
+        run(["ssh-keygen", "-t", "ed25519", "-f", str(private_key), "-N", ""])
 
     ssh_dir.mkdir(mode=0o700, exist_ok=True)
     shutil.copy(public_key, authorized_keys)
@@ -205,14 +223,23 @@ def setup_host_ssh_key(workdir: Path, rootfs: Path) -> Path:
     Private key → baked into the rootfs at /etc/ssh/ so sshd presents a known identity.
     Public key  → returned (installed to /var/lib/fc/vm_host_key.pub so the server
                   can verify the VM and prevent MITM on the TAP network).
+
+    Reuses the existing host key from INSTALL_DIR if present.
     """
     private_key = workdir / "ssh_host_ed25519_key"
     public_key = workdir / "ssh_host_ed25519_key.pub"
     etc_ssh = rootfs / "etc/ssh"
+    existing_pub = INSTALL_DIR / "vm_host_key.pub"
+    existing_priv = INSTALL_DIR / "vm_host_ed25519_key"
 
-    private_key.unlink(missing_ok=True)
-    public_key.unlink(missing_ok=True)
-    run(["ssh-keygen", "-t", "ed25519", "-f", str(private_key), "-N", ""])
+    if existing_pub.exists() and existing_priv.exists():
+        print(f"  reusing existing host SSH key: {existing_priv}")
+        shutil.copy(existing_priv, private_key)
+        shutil.copy(existing_pub, public_key)
+    else:
+        private_key.unlink(missing_ok=True)
+        public_key.unlink(missing_ok=True)
+        run(["ssh-keygen", "-t", "ed25519", "-f", str(private_key), "-N", ""])
 
     etc_ssh.mkdir(parents=True, exist_ok=True)
     shutil.copy(private_key, etc_ssh / "ssh_host_ed25519_key")
@@ -313,6 +340,13 @@ def install_agent(rootfs: Path, mcp_base_url: str | None = None) -> None:
     if not service_link.exists():
         service_link.symlink_to("../agent.service")
 
+    # Install claude-update service to update Claude CLI on boot.
+    update_dest = systemd_system / "claude-update.service"
+    shutil.copy(str(CLAUDE_UPDATE_SERVICE), str(update_dest))
+    update_link = multi_user_wants / "claude-update.service"
+    if not update_link.exists():
+        update_link.symlink_to("../claude-update.service")
+
     # Install socat MCP proxy service when an MCP base URL is configured.
     if mcp_base_url:
         from urllib.parse import urlparse
@@ -374,6 +408,12 @@ WantedBy=multi-user.target
 def ensure_claude_dir(rootfs: Path) -> None:
     claude_dir = rootfs / "home/ubuntu/.claude"
     claude_dir.mkdir(parents=True, exist_ok=True)
+    # Install built-in skills so /commit, /review, etc. work via the SDK.
+    skills_dest = claude_dir / "skills"
+    if SKILLS_DIR.is_dir():
+        if skills_dest.exists():
+            shutil.rmtree(str(skills_dest))
+        shutil.copytree(str(SKILLS_DIR), str(skills_dest))
     run(["chown", "-R", "1000:1000", str(claude_dir)])
 
 
@@ -399,14 +439,22 @@ def install_artifacts(
     ext4_dest = INSTALL_DIR / ext4.name
     client_key_dest = INSTALL_DIR / f"{ubuntu_name}.id_ed25519"
     host_key_pub_dest = INSTALL_DIR / "vm_host_key.pub"
+    # Also persist the host private key so it can be reused on rebuild.
+    host_key_priv_dest = INSTALL_DIR / "vm_host_ed25519_key"
+    host_ssh_key_priv = host_ssh_key_pub.parent / "ssh_host_ed25519_key"
 
     shutil.move(str(kernel), str(kernel_dest))
     shutil.move(str(ext4), str(ext4_dest))
     shutil.move(str(client_ssh_key), str(client_key_dest))
     shutil.copy(str(host_ssh_key_pub), str(host_key_pub_dest))
+    if host_ssh_key_priv.exists():
+        shutil.copy(str(host_ssh_key_priv), str(host_key_priv_dest))
+        host_key_priv_dest.chmod(0o600)
 
     run(["chown", "-R", "ubuntu:ubuntu", str(INSTALL_DIR)])
     client_key_dest.chmod(0o600)
+    if host_key_priv_dest.exists():
+        host_key_priv_dest.chmod(0o600)
 
     return kernel_dest, ext4_dest, client_key_dest, host_key_pub_dest
 
@@ -602,7 +650,7 @@ def main() -> None:
     parser.add_argument(
         "--mcp-base-url",
         default=None,
-        help="MCP server base URL for socat reverse proxy (e.g. https://34.49.122.135)",
+        help="MCP server base URL for socat reverse proxy (e.g. https://mcp.example.com)",
     )
     args = parser.parse_args()
 
@@ -627,7 +675,7 @@ def main() -> None:
     )
 
     rootfs = unpack_squashfs(workdir, squashfs)
-    client_ssh_key = setup_client_ssh_key(workdir, rootfs)
+    client_ssh_key = setup_client_ssh_key(workdir, rootfs, ubuntu_name)
     host_ssh_key_pub = setup_host_ssh_key(workdir, rootfs)
     prepare_rootfs(rootfs)
 

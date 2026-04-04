@@ -2,6 +2,7 @@ import React from "react";
 import { ChevronDown, ChevronRight, Wrench } from "lucide-react";
 import type { ToolResult } from "../types";
 import ToolDiffViewer from "./ToolDiffViewer";
+import { safeJsonParse } from "../utils/safeJson";
 
 interface ToolRendererProps {
   toolName: string;
@@ -16,6 +17,16 @@ export default function ToolRenderer({
   toolResult,
   autoExpandTools,
 }: ToolRendererProps) {
+  if (toolName === "TaskCreate") {
+    return <TaskCreateCard toolResult={toolResult} toolInput={toolInput} />;
+  }
+  if (toolName === "TaskUpdate") {
+    return <TaskUpdateCard toolResult={toolResult} toolInput={toolInput} />;
+  }
+  if (toolName === "TaskList") {
+    return <TaskListCard toolResult={toolResult} />;
+  }
+
   return (
     <div className="my-0.5 overflow-hidden rounded-xl border border-border/60 bg-card shadow-md shadow-black/5 ring-1 ring-border/10">
       <ToolHeader
@@ -24,6 +35,109 @@ export default function ToolRenderer({
         toolResult={toolResult}
         autoExpandTools={autoExpandTools}
       />
+    </div>
+  );
+}
+
+function parseResult<T>(content: string | undefined): T | null {
+  if (!content) return null;
+  try {
+    return safeJsonParse<T>(content);
+  } catch {
+    return null;
+  }
+}
+
+function TaskCreateCard({
+  toolResult,
+  toolInput,
+}: {
+  toolResult?: ToolResult;
+  toolInput: Record<string, unknown>;
+}) {
+  const parsed = parseResult<{
+    task?: { id?: string; subject?: string; status?: string };
+  }>(toolResult?.content);
+  const task = parsed?.task;
+  const id = task?.id ?? String(toolInput.id ?? "");
+  const subject = task?.subject ?? String(toolInput.subject ?? "");
+  return (
+    <div className="my-0.5 flex items-center gap-2 rounded-lg border border-border/50 bg-muted/20 px-3 py-1.5 text-sm">
+      <span className="font-mono text-xs text-foreground/40">#{id}</span>
+      <span className="text-foreground/80">{subject}</span>
+    </div>
+  );
+}
+
+function TaskUpdateCard({
+  toolResult,
+  toolInput,
+}: {
+  toolResult?: ToolResult;
+  toolInput: Record<string, unknown>;
+}) {
+  const parsed = parseResult<{
+    taskId?: string;
+    statusChange?: { from?: string; to?: string };
+  }>(toolResult?.content);
+  const taskId =
+    parsed?.taskId ?? String(toolInput.taskId ?? toolInput.task_id ?? "");
+  const toStatus = parsed?.statusChange?.to ?? String(toolInput.status ?? "");
+  const STATUS_COLORS: Record<string, string> = {
+    completed: "text-emerald-500",
+    in_progress: "text-primary",
+    pending: "text-muted-foreground",
+  };
+  return (
+    <div className="my-0.5 flex items-center gap-2 rounded-lg border border-border/50 bg-muted/20 px-3 py-1.5 text-sm">
+      <span className="font-mono text-xs text-foreground/40">#{taskId}</span>
+      <span
+        className={`text-xs font-medium ${STATUS_COLORS[toStatus] ?? "text-muted-foreground"}`}
+      >
+        {toStatus}
+      </span>
+    </div>
+  );
+}
+
+function TaskListCard({ toolResult }: { toolResult?: ToolResult }) {
+  const parsed = parseResult<{
+    tasks?: {
+      id?: string;
+      subject?: string;
+      status?: string;
+      blockedBy?: string[];
+    }[];
+  }>(toolResult?.content);
+  const tasks = parsed?.tasks ?? [];
+  if (tasks.length === 0) return null;
+  const STATUS_COLORS: Record<string, string> = {
+    completed: "text-emerald-500",
+    in_progress: "text-primary",
+    pending: "text-muted-foreground",
+  };
+  return (
+    <div className="my-0.5 rounded-lg border border-border/50 bg-muted/20 px-3 py-1.5">
+      {tasks.map((task) => (
+        <div key={task.id} className="flex items-center gap-2 py-0.5 text-sm">
+          <span className="font-mono text-xs text-foreground/40">
+            #{task.id}
+          </span>
+          <span className="text-foreground/80">{task.subject}</span>
+          {task.blockedBy && task.blockedBy.length > 0 && (
+            <span className="ml-auto text-xs text-amber-500">
+              blocked by #{task.blockedBy[0]}
+            </span>
+          )}
+          {task.status && (
+            <span
+              className={`ml-auto text-xs ${STATUS_COLORS[task.status] ?? "text-muted-foreground"}`}
+            >
+              {task.status}
+            </span>
+          )}
+        </div>
+      ))}
     </div>
   );
 }

@@ -16,7 +16,7 @@ mod vm_config;
 pub use iam::{HostIamCredential, fetch_host_iam_credentials};
 pub use mmds::refresh_all_vm_mmds;
 pub use rootfs::{
-    build_user_rootfs_path, ensure_user_rootfs, find_user_rootfs, save_all_vm_rootfs,
+    build_chroot_rootfs_path, ensure_chroot_rootfs, find_user_rootfs, save_all_vm_rootfs,
 };
 pub use sweep::sweep_idle_vms;
 pub use vm_config::{build_vm_config, build_vm_config_without_iam};

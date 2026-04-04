@@ -16,14 +16,16 @@ async fn send_request(
     uri: &str,
     body: &impl Serialize,
 ) -> Result<()> {
-    let bytes = serde_json::to_vec(body)?;
+    let bytes = serde_json::to_vec(body).context("failed to serialize request body")?;
     let stream = UnixStream::connect(socket_path).await.with_context(|| {
         format!(
             "failed to connect to firecracker socket {}",
             socket_path.display()
         )
     })?;
-    let (mut sender, conn) = http1::handshake(TokioIo::new(stream)).await?;
+    let (mut sender, conn) = http1::handshake(TokioIo::new(stream))
+        .await
+        .context("HTTP handshake failed")?;
     tokio::spawn(async move {
         if let Err(_err) = conn.await {
             tracing::debug!("firecracker connection closed");
@@ -36,13 +38,22 @@ async fn send_request(
         .header("Host", "localhost")
         .header("Content-Type", "application/json")
         .header("Accept", "application/json")
-        .body(Full::new(Bytes::from(bytes)))?;
+        .body(Full::new(Bytes::from(bytes)))
+        .context("failed to build request")?;
 
-    let response = sender.send_request(request).await?;
+    let response = sender
+        .send_request(request)
+        .await
+        .context("failed to send request to firecracker")?;
 
     if !response.status().is_success() {
         let status = response.status();
-        let bytes = response.into_body().collect().await?.to_bytes();
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .context("failed to read response body")?
+            .to_bytes();
         let body = String::from_utf8_lossy(&bytes).into_owned();
         bail!("firecracker api returned {status}: {body}");
     }

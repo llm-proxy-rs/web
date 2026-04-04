@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatMessage, Conversation } from "../types";
-import type { UiPreferences } from "../hooks/useUiPreferences";
 import { safeJsonParse } from "../utils/safeJson";
 import { useSse } from "../contexts/SseContext";
 import { useChatState } from "../hooks/useChatState";
@@ -10,14 +9,21 @@ import AskUserQuestionPanel from "./AskUserQuestionPanel";
 import ChatComposer from "./ChatComposer";
 import ChatMessagesPane from "./ChatMessagesPane";
 import ClaudeStatus from "./ClaudeStatus";
+import PlanApprovalCard from "./PlanApprovalCard";
 import QueueDrawer from "./QueueDrawer";
+import TaskWidget from "./TaskWidget";
+import WorktreeBadge from "./WorktreeBadge";
 
 interface ChatInterfaceProps {
   selectedConversation: Conversation | null;
   newChatKey?: number;
   onRunningConversationChange?: (runningIds: Set<string>) => void;
   onConversationCreated?: (conversation: Conversation) => void;
-  preferences?: UiPreferences;
+  preferences?: {
+    showThinking?: boolean;
+    autoExpandTools?: boolean;
+    autoScrollToBottom?: boolean;
+  };
 }
 
 export default function ChatInterface({
@@ -197,6 +203,7 @@ export default function ChatInterface({
         timestamp: Date.now(),
       });
       addRunningConversation(targetConversationId);
+      chatState.setStreamStartTime?.(targetConversationId, Date.now());
 
       sseCtx.sendQuery(text, targetConversationId, sessionId);
     },
@@ -382,7 +389,12 @@ export default function ChatInterface({
   const isCurrentRunning =
     viewConversationId !== null && isConversationRunning(viewConversationId);
   const streamPhase = chatState.getStreamPhase(viewConversationId);
+  const streamStartTime = chatState.getStreamStartTime?.(viewConversationId);
   const messageQueue = getQueue(viewConversationId);
+  const worktreeActive = chatState.isWorktreeActive(viewConversationId);
+  const worktreeName = chatState.getWorktreeName(viewConversationId);
+  const planActive = chatState.isPlanActive(viewConversationId);
+  const tasks = chatState.getTasksForConversation(viewConversationId);
 
   // Drain queued messages when any conversation stops running.
   // Compares the current runningConversationIds with the previous snapshot
@@ -482,6 +494,7 @@ export default function ChatInterface({
 
   // Drag-and-drop for the entire message area
   const [dragging, setDragging] = useState(false);
+  const [dragInfo, setDragInfo] = useState<string>("");
   const [droppedFiles, setDroppedFiles] = useState<File[] | undefined>();
   const dragCounterRef = useRef(0);
 
@@ -489,7 +502,15 @@ export default function ChatInterface({
     e.preventDefault();
     e.stopPropagation();
     dragCounterRef.current++;
-    if (dragCounterRef.current === 1) setDragging(true);
+    if (dragCounterRef.current === 1) {
+      setDragging(true);
+      const count = e.dataTransfer.items?.length ?? 0;
+      if (count > 1) {
+        setDragInfo(`Drop ${count} files to attach`);
+      } else {
+        setDragInfo("Drop file to attach");
+      }
+    }
   }, []);
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
@@ -523,35 +544,50 @@ export default function ChatInterface({
     >
       {dragging && (
         <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center rounded-lg border-2 border-dashed border-primary/50 bg-primary/5">
-          <p className="text-sm font-medium text-primary">
-            Drop files to attach
-          </p>
+          <p className="text-sm font-medium text-primary">{dragInfo}</p>
+        </div>
+      )}
+      {/* Status badges */}
+      {worktreeActive && (
+        <div className="flex items-center gap-2 border-b border-border/50 px-4 py-1.5">
+          <WorktreeBadge name={worktreeName} />
         </div>
       )}
       <ChatMessagesPane
         key={viewConversationId ?? "empty"}
         messages={messages}
         isLoading={isCurrentRunning}
-        autoScrollToBottom={preferences?.autoScrollToBottom}
         showThinking={preferences?.showThinking}
         autoExpandTools={preferences?.autoExpandTools}
+        autoScrollToBottom={preferences?.autoScrollToBottom}
       />
       <div className="mx-auto w-full max-w-3xl">
         <ClaudeStatus
           key={viewConversationId ?? "none"}
-          isLoading={isCurrentRunning}
+          isLoading={isCurrentRunning && !pendingQuestion}
           streamPhase={streamPhase}
-          onAbort={handleStop}
+          startTime={streamStartTime}
         />
       </div>
+      <TaskWidget tasks={tasks} />
       {pendingQuestion ? (
         <div className="flex-shrink-0 border-t border-border p-4">
           <div className="mx-auto max-w-3xl">
-            <AskUserQuestionPanel
-              pendingQuestion={pendingQuestion}
-              onSubmit={handleAnswerQuestion}
-              onSkip={handleSkipQuestion}
-            />
+            {planActive ? (
+              <PlanApprovalCard>
+                <AskUserQuestionPanel
+                  pendingQuestion={pendingQuestion}
+                  onSubmit={handleAnswerQuestion}
+                  onSkip={handleSkipQuestion}
+                />
+              </PlanApprovalCard>
+            ) : (
+              <AskUserQuestionPanel
+                pendingQuestion={pendingQuestion}
+                onSubmit={handleAnswerQuestion}
+                onSkip={handleSkipQuestion}
+              />
+            )}
           </div>
         </div>
       ) : (
@@ -567,7 +603,6 @@ export default function ChatInterface({
             onStop={handleStop}
             focusKey={composerFocusKey}
             droppedFiles={droppedFiles}
-            queuedCount={messageQueue.length}
           />
         </>
       )}

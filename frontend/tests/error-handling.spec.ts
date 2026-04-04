@@ -59,12 +59,13 @@ test.describe("error-handling", () => {
     await page.getByRole("button", { name: "Yes" }).click();
 
     // Submit triggers the POST; the 500 causes the catch branch to keep the panel visible for retry
+    const answerResponsePromise = page.waitForResponse(
+      (r) => r.url().includes("chat-question-answer") && r.status() === 500,
+    );
     await page.getByRole("button", { name: "Submit" }).click();
 
     // Wait for the failed POST to complete
-    await page.waitForResponse(
-      (r) => r.url().includes("chat-question-answer") && r.status() === 500,
-    );
+    await answerResponsePromise;
 
     // Panel stays visible so the user can retry (same behaviour as UF-96)
     await expect(page.getByText("Claude needs your input")).toBeVisible();

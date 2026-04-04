@@ -2552,5 +2552,322 @@ class TestQuerySemaphore(unittest.IsolatedAsyncioTestCase):
             agent._query_semaphore = original
 
 
+class TestLoadMcpServers(unittest.TestCase):
+    """load_mcp_servers merges build-time MCP_SERVERS with ~/.claude.json runtime config."""
+
+    def test_returns_empty_dict_when_no_build_time_or_file(self):
+        original = agent.MCP_SERVERS
+        agent.MCP_SERVERS = {}
+        try:
+            with unittest.mock.patch("builtins.open", side_effect=FileNotFoundError):
+                result = agent.load_mcp_servers()
+            self.assertEqual(result, {})
+        finally:
+            agent.MCP_SERVERS = original
+
+    def test_returns_build_time_servers_when_file_not_found(self):
+        original = agent.MCP_SERVERS
+        agent.MCP_SERVERS = {
+            "builtin": {"type": "http", "url": "http://localhost:8443/mcp"}
+        }
+        try:
+            with unittest.mock.patch("builtins.open", side_effect=FileNotFoundError):
+                result = agent.load_mcp_servers()
+            self.assertEqual(
+                result,
+                {"builtin": {"type": "http", "url": "http://localhost:8443/mcp"}},
+            )
+        finally:
+            agent.MCP_SERVERS = original
+
+    def test_returns_file_servers_when_no_build_time(self):
+        original = agent.MCP_SERVERS
+        agent.MCP_SERVERS = {}
+        try:
+            file_content = json.dumps(
+                {
+                    "mcpServers": {
+                        "my-server": {"type": "http", "url": "https://example.com/mcp"}
+                    }
+                }
+            )
+            with unittest.mock.patch(
+                "builtins.open", unittest.mock.mock_open(read_data=file_content)
+            ):
+                result = agent.load_mcp_servers()
+            self.assertEqual(
+                result,
+                {"my-server": {"type": "http", "url": "https://example.com/mcp"}},
+            )
+        finally:
+            agent.MCP_SERVERS = original
+
+    def test_merges_build_time_and_file_servers(self):
+        original = agent.MCP_SERVERS
+        agent.MCP_SERVERS = {
+            "builtin": {"type": "http", "url": "http://localhost:8443/mcp"}
+        }
+        try:
+            file_content = json.dumps(
+                {
+                    "mcpServers": {
+                        "runtime": {"type": "http", "url": "https://runtime.com/mcp"}
+                    }
+                }
+            )
+            with unittest.mock.patch(
+                "builtins.open", unittest.mock.mock_open(read_data=file_content)
+            ):
+                result = agent.load_mcp_servers()
+            self.assertIn("builtin", result)
+            self.assertIn("runtime", result)
+            self.assertEqual(result["builtin"]["url"], "http://localhost:8443/mcp")
+            self.assertEqual(result["runtime"]["url"], "https://runtime.com/mcp")
+        finally:
+            agent.MCP_SERVERS = original
+
+    def test_file_servers_override_build_time_on_name_conflict(self):
+        original = agent.MCP_SERVERS
+        agent.MCP_SERVERS = {"shared": {"type": "http", "url": "http://old.com"}}
+        try:
+            file_content = json.dumps(
+                {"mcpServers": {"shared": {"type": "http", "url": "https://new.com"}}}
+            )
+            with unittest.mock.patch(
+                "builtins.open", unittest.mock.mock_open(read_data=file_content)
+            ):
+                result = agent.load_mcp_servers()
+            self.assertEqual(result["shared"]["url"], "https://new.com")
+        finally:
+            agent.MCP_SERVERS = original
+
+    def test_handles_invalid_json_in_file(self):
+        original = agent.MCP_SERVERS
+        agent.MCP_SERVERS = {"builtin": {"type": "http"}}
+        try:
+            with unittest.mock.patch(
+                "builtins.open", unittest.mock.mock_open(read_data="not valid json")
+            ):
+                result = agent.load_mcp_servers()
+            self.assertEqual(result, {"builtin": {"type": "http"}})
+        finally:
+            agent.MCP_SERVERS = original
+
+    def test_handles_file_with_no_mcp_servers_key(self):
+        original = agent.MCP_SERVERS
+        agent.MCP_SERVERS = {}
+        try:
+            file_content = json.dumps({"env": {"FOO": "bar"}})
+            with unittest.mock.patch(
+                "builtins.open", unittest.mock.mock_open(read_data=file_content)
+            ):
+                result = agent.load_mcp_servers()
+            self.assertEqual(result, {})
+        finally:
+            agent.MCP_SERVERS = original
+
+    def test_does_not_mutate_original_mcp_servers(self):
+        original = agent.MCP_SERVERS
+        agent.MCP_SERVERS = {"builtin": {"type": "http"}}
+        try:
+            file_content = json.dumps({"mcpServers": {"extra": {"type": "http"}}})
+            with unittest.mock.patch(
+                "builtins.open", unittest.mock.mock_open(read_data=file_content)
+            ):
+                result = agent.load_mcp_servers()
+            self.assertNotIn("extra", agent.MCP_SERVERS)
+            self.assertIn("extra", result)
+        finally:
+            agent.MCP_SERVERS = original
+
+    def test_preserves_headers_from_file(self):
+        original = agent.MCP_SERVERS
+        agent.MCP_SERVERS = {}
+        try:
+            file_content = json.dumps(
+                {
+                    "mcpServers": {
+                        "auth-server": {
+                            "type": "http",
+                            "url": "https://example.com/mcp",
+                            "headers": {"Authorization": "Bearer sk-123"},
+                        }
+                    }
+                }
+            )
+            with unittest.mock.patch(
+                "builtins.open", unittest.mock.mock_open(read_data=file_content)
+            ):
+                result = agent.load_mcp_servers()
+            self.assertEqual(
+                result["auth-server"]["headers"]["Authorization"], "Bearer sk-123"
+            )
+        finally:
+            agent.MCP_SERVERS = original
+
+
+class TestLoadMcpServersOAuth(unittest.TestCase):
+    """OAuth-stored MCP server configs are loaded correctly with headers and tokens."""
+
+    def test_loads_oauth_server_with_authorization_header(self):
+        """Server stored by OAuth callback includes Authorization header."""
+        original = agent.MCP_SERVERS
+        agent.MCP_SERVERS = {}
+        try:
+            file_content = json.dumps(
+                {
+                    "mcpServers": {
+                        "figma": {
+                            "type": "http",
+                            "url": "https://mcp.figma.com/mcp",
+                            "headers": {"Authorization": "Bearer access-token-123"},
+                        }
+                    }
+                }
+            )
+            with unittest.mock.patch(
+                "builtins.open", unittest.mock.mock_open(read_data=file_content)
+            ):
+                result = agent.load_mcp_servers()
+            self.assertIn("figma", result)
+            self.assertEqual(result["figma"]["url"], "https://mcp.figma.com/mcp")
+            self.assertEqual(
+                result["figma"]["headers"]["Authorization"],
+                "Bearer access-token-123",
+            )
+        finally:
+            agent.MCP_SERVERS = original
+
+    def test_loads_oauth_server_with_refresh_token_metadata(self):
+        """Server stored by OAuth callback includes _refresh_token field."""
+        original = agent.MCP_SERVERS
+        agent.MCP_SERVERS = {}
+        try:
+            file_content = json.dumps(
+                {
+                    "mcpServers": {
+                        "figma": {
+                            "type": "http",
+                            "url": "https://mcp.figma.com/mcp",
+                            "headers": {"Authorization": "Bearer tok"},
+                            "_refresh_token": "refresh-456",
+                        }
+                    }
+                }
+            )
+            with unittest.mock.patch(
+                "builtins.open", unittest.mock.mock_open(read_data=file_content)
+            ):
+                result = agent.load_mcp_servers()
+            self.assertIn("figma", result)
+            self.assertEqual(result["figma"]["_refresh_token"], "refresh-456")
+        finally:
+            agent.MCP_SERVERS = original
+
+    def test_oauth_server_merges_with_build_time_servers(self):
+        """OAuth runtime servers merge alongside build-time servers."""
+        original = agent.MCP_SERVERS
+        agent.MCP_SERVERS = {
+            "builtin": {"type": "http", "url": "http://localhost:8443/mcp"}
+        }
+        try:
+            file_content = json.dumps(
+                {
+                    "mcpServers": {
+                        "figma": {
+                            "type": "http",
+                            "url": "https://mcp.figma.com/mcp",
+                            "headers": {"Authorization": "Bearer tok"},
+                        }
+                    }
+                }
+            )
+            with unittest.mock.patch(
+                "builtins.open", unittest.mock.mock_open(read_data=file_content)
+            ):
+                result = agent.load_mcp_servers()
+            self.assertIn("builtin", result)
+            self.assertIn("figma", result)
+            self.assertEqual(result["builtin"]["url"], "http://localhost:8443/mcp")
+            self.assertNotIn("headers", result["builtin"])
+            self.assertEqual(result["figma"]["headers"]["Authorization"], "Bearer tok")
+        finally:
+            agent.MCP_SERVERS = original
+
+    def test_oauth_server_without_headers_still_loads(self):
+        """An OAuth server entry missing headers still loads (graceful)."""
+        original = agent.MCP_SERVERS
+        agent.MCP_SERVERS = {}
+        try:
+            file_content = json.dumps(
+                {
+                    "mcpServers": {
+                        "no-headers": {
+                            "type": "http",
+                            "url": "https://example.com/mcp",
+                        }
+                    }
+                }
+            )
+            with unittest.mock.patch(
+                "builtins.open", unittest.mock.mock_open(read_data=file_content)
+            ):
+                result = agent.load_mcp_servers()
+            self.assertIn("no-headers", result)
+            self.assertEqual(result["no-headers"]["url"], "https://example.com/mcp")
+        finally:
+            agent.MCP_SERVERS = original
+
+
+class TestSlashCommandRouting(unittest.IsolatedAsyncioTestCase):
+    """Slash commands (e.g. /commit) are sent via build_prompt_stream like
+    regular messages — the SDK's internal CLI subprocess handles parsing.
+    The key requirement is that allowed_tools includes 'Skill' and
+    setting_sources includes 'project' so the SDK can discover skills."""
+
+    async def _capture_prompt(self, content: str) -> list[dict]:
+        """Run run_query and capture what was passed to the mock query()."""
+        captured_items: list[dict] = []
+
+        async def spy_query(prompt, options):
+            async for item in prompt:
+                captured_items.append(item)
+            return
+            yield  # make it an async generator
+
+        old_mods = _install_sdk_mock(custom_query=spy_query)
+        task_id = f"slash-{content[:10]}"
+        writer = MockWriter()
+        agent._sessions[task_id] = agent.Session(
+            task=asyncio.current_task(), writer=writer, conversation_id=""
+        )
+        token1 = agent._emit_writer.set(writer)
+        token2 = agent._emit_session_id.set(task_id)
+        try:
+            await agent.run_query(content, None, task_id, "", "/root")
+        finally:
+            _restore_sdk_mock(old_mods)
+            agent._emit_writer.reset(token1)
+            agent._emit_session_id.reset(token2)
+            agent._sessions.pop(task_id, None)
+        return captured_items
+
+    async def test_slash_command_sent_via_async_iterable(self):
+        """Slash commands go through build_prompt_stream for SDK compatibility."""
+        items = await self._capture_prompt("/commit")
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["message"]["content"], "/commit")
+        self.assertEqual(items[0]["type"], "user")
+
+    async def test_slash_command_with_args(self):
+        items = await self._capture_prompt("/compact summarize briefly")
+        self.assertEqual(items[0]["message"]["content"], "/compact summarize briefly")
+
+    async def test_regular_message_sent_via_async_iterable(self):
+        items = await self._capture_prompt("hello world")
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["message"]["content"], "hello world")
+
+
 if __name__ == "__main__":
     unittest.main()

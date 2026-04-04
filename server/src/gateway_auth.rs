@@ -41,6 +41,8 @@ pub(crate) async fn initiate_gateway_login(
 
     let (url, csrf_token, nonce, pkce_verifier) = builder.build()?;
 
+    // insert overwrites any stale values from a previous abandoned OAuth flow,
+    // and the callback uses remove for single-use consumption.
     session
         .insert("gateway_oauth_state", csrf_token.secret())
         .await

@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
@@ -19,7 +19,8 @@ pub async fn upsert_user(pg_pool: &PgPool, email: &str) -> Result<User> {
     )
     .bind(email)
     .fetch_one(pg_pool)
-    .await?;
+    .await
+    .context("failed to upsert user")?;
     Ok(user)
 }
 
@@ -27,6 +28,7 @@ pub async fn get_user_by_email(pg_pool: &PgPool, email: &str) -> Result<Option<U
     let user = sqlx::query_as::<_, User>("SELECT id, email FROM users WHERE email = $1")
         .bind(email)
         .fetch_optional(pg_pool)
-        .await?;
+        .await
+        .context("failed to get user by email")?;
     Ok(user)
 }
